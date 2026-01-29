@@ -1,0 +1,128 @@
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { fetchClient } from "../api/fetchClient";
+import { Button, Card, CardContent, TextField, Container, InputAdornment, IconButton } from "@mui/material";
+import { useAuthStore } from "../store/auth.store";
+import { Visibility, VisibilityOff } from "@mui/icons-material";
+
+export default function Login() {
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
+    const navigate = useNavigate();
+    const login = useAuthStore((s) => s.login);
+
+    const handleSubmit = async () => {
+        setLoading(true);
+        try {
+            const res = await fetchClient("/auth/login", {
+                method: "POST",
+                body: JSON.stringify({ email, password })
+            })
+            
+            login(res.user, res.token);
+            navigate("/");
+        }
+        finally {
+            setLoading(false);
+        }
+    }
+
+    return (
+        <div className="flex items-center justify-center p-5 min-h-screen bg-gradient-to-br from-[#667eea] to-[#764ba2]">
+            <Container maxWidth="sm">
+                <Card sx={{
+                    borderRadius: 3,
+                    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                }}>
+                    <CardContent sx={{ p: 4 }}>
+                        <div className="text-center mb-8">
+                            <h1 className="text-[32px] font-[700] text-[#333] mb-8">Welcome Back</h1>
+                            <p className="text-[#666] text-[14px]">Sign in to your account</p>
+                        </div>
+                        <div className="flex flex-col gap-6">
+                            <TextField
+                                label="Email"
+                                fullWidth
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2,
+                                        '& fieldset': { borderColor: '#e0e0e0' },
+                                        '&:hover fieldset': { borderColor: '#667eea' },
+                                        '&.Mui-focused fieldset': { borderColor: '#667eea' }
+                                    }
+                                }}
+                            />
+                            <TextField
+                                label="Password"
+                                type={showPassword ? "text" : "password"}
+                                fullWidth
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                InputProps={{
+                                    endAdornment: (
+                                        <InputAdornment position="end">
+                                            <IconButton
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                edge="end"
+                                                sx={{
+                                                    color: '#667eea',
+                                                    '&:hover': {
+                                                        backgroundColor: 'rgba(102, 126, 234, 0.08)'
+                                                    }
+                                                }}
+                                            >
+                                                {showPassword ? <VisibilityOff /> : <Visibility />}
+                                            </IconButton>
+                                        </InputAdornment>
+                                    )
+                                }}
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2,
+                                        '& fieldset': { borderColor: '#e0e0e0' },
+                                        '&:hover fieldset': { borderColor: '#667eea' },
+                                        '&.Mui-focused fieldset': { borderColor: '#667eea' }
+                                    }
+                                }}
+                            />
+                            <Button
+                                fullWidth
+                                variant="contained"
+                                onClick={handleSubmit}
+                                disabled={loading}
+                                sx={{
+                                    background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+                                    padding: '12px',
+                                    fontSize: 16,
+                                    fontWeight: 600,
+                                    borderRadius: 2,
+                                    textTransform: 'none',
+                                    '&:hover': {
+                                        boxShadow: '0 6px 20px rgba(102, 126, 234, 0.4)',
+                                        transform: 'translateY(-2px)'
+                                    },
+                                    transition: 'all 0.3s ease'
+                                }}
+                            >
+                                {loading ? 'Signing in...' : 'Sign In'}
+                            </Button>
+                        </div>
+                        <div className="text-center mt-8">
+                            <p className="text-[#666] text-[14px]">
+                                Don't have an account?{' '}
+                                <Link to="/register" className="text-[#667eea] font-[600]">
+                                    Register here
+                                </Link>
+                            </p>
+                        </div>
+                    </CardContent>
+                </Card>
+            </Container>
+        </div>
+    )
+}
