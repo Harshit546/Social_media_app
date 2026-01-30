@@ -12,17 +12,33 @@ export default function Login() {
     const [showPassword, setShowPassword] = useState(false);
     const navigate = useNavigate();
     const login = useAuthStore((s) => s.login);
+    const [errors, setErrors] = useState<Record<string, string>>({});
 
     const handleSubmit = async () => {
         setLoading(true);
+        setErrors({});
+
         try {
             const res = await fetchClient("/auth/login", {
                 method: "POST",
                 body: JSON.stringify({ email, password })
             })
             
-            login(res.user, res.token);
+            login(res.data.user, res.data.token);
             navigate("/");
+        }
+        catch (err: any) {
+            if (err.statusCode === 422 && err.errors) {
+                const fieldErrors: Record<string, string> = {};
+
+                Object.entries(err.errors).forEach(([field, messages]: any) => {
+                    fieldErrors[field] = messages[0]; // show first error
+                });
+
+                setErrors(fieldErrors);
+            } else {
+                alert(err.message || "Something went wrong");
+            }
         }
         finally {
             setLoading(false);
@@ -47,6 +63,8 @@ export default function Login() {
                                 fullWidth
                                 type="email"
                                 value={email}
+                                error={Boolean(errors.email)}
+                                helperText={errors.email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 sx={{
                                     '& .MuiOutlinedInput-root': {
@@ -62,6 +80,8 @@ export default function Login() {
                                 type={showPassword ? "text" : "password"}
                                 fullWidth
                                 value={password}
+                                error={Boolean(errors.password)}
+                                helperText={errors.password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 InputProps={{
                                     endAdornment: (

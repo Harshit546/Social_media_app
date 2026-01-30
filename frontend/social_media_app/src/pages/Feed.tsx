@@ -13,7 +13,7 @@ export default function Feed() {
         const loadPosts = async () => {
             try {
                 const data = await fetchClient("/posts");
-                setPosts(data);
+                setPosts(Array.isArray(data) ? data : data.data ?? []);
             } finally {
                 setLoading(false);
             }
@@ -42,7 +42,7 @@ export default function Feed() {
                     </Box>
                 ) : (
                     posts.map((post) => (
-                        <PostCard key={post._id} post={post} />
+                        <PostCard key={post._id} post={post} onDelete={(id: any) => setPosts(posts.filter(p => p._id !== id))}  />
                     ))
                 )}
             </Container>

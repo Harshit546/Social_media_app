@@ -1,11 +1,28 @@
-import {email, z} from "zod"
+export const registerRules = {
+    email: 'required|email|string',
+    password: 'required|string|min:8|max:32|uppercase|lowercase|digit|special'
+};
 
-export const registerSchema = z.object({
-    email: z.string().email({message: "Invalid email"}),
-    password: z.string().min(8, "Password must be atleast 8 characters").max(32, "Password must be at most 32 characters").regex(/[A-Z]/, "Password must contain 1 uppercase letter").regex(/[a-z]/, "Password must contain 1 lowercase letter").regex(/[0-9]/, "Password must contain 1 digit").regex(/[^A-Za-z0-9]/, "Password must contain 1 special character")
-})
+export const loginRules = {
+    email: 'required|email|string',
+    password: 'required|string|min:8'
+};
 
-export const loginSchema = z.object({
-    email: z.string().email({message: "Invalid email"}),
-    password: z.string().min(8)
-})
+export const registerMessages = {
+    'email.required': 'Email is required',
+    'email.email': 'Invalid email',
+    'password.required': 'Password is required',
+    'password.min': 'Password must be at least 8 characters',
+    'password.max': 'Password must be at most 32 characters',
+    'password.uppercase': 'Password must contain 1 uppercase letter',
+    'password.lowercase': 'Password must contain 1 lowercase letter',
+    'password.digit': 'Password must contain 1 digit',
+    'password.special': 'Password must contain 1 special character'
+};
+
+export const loginMessages = {
+    'email.required': 'Email is required',
+    'email.email': 'Invalid email',
+    'password.required': 'Password is required',
+    'password.min': 'Password must be at least 8 characters'
+};

@@ -1,21 +1,18 @@
+import { jwtDecode } from "jwt-decode";
+
 export const getCurrentUser = () => {
     const token = localStorage.getItem("token");
-    if (!token) {
-        return null;
-    }
+    if (!token) return null;
 
     try {
-        const base64Payload = token.split(".")[1];
-        const decodedPayload = JSON.parse(atob(base64Payload));
-
-        return {
-            id: decodedPayload.id,
-            email: decodedPayload.email,
-            role: decodedPayload.role
-        }
-    } 
-    catch (err) {
+        return jwtDecode<{
+            id: string;
+            email: string;
+            role?: string;
+        }>(token);
+    } catch {
         console.error("Invalid token");
+        localStorage.removeItem("token");
         return null;
     }
 };
