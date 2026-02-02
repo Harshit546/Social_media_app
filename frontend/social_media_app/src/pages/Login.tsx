@@ -1,63 +1,110 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { fetchClient } from "../api/fetchClient";
-import { Button, Card, CardContent, TextField, Container, InputAdornment, IconButton } from "@mui/material";
+import {
+    Button,
+    Card,
+    CardContent,
+    TextField,
+    Container,
+    InputAdornment,
+    IconButton
+} from "@mui/material";
 import { useAuthStore } from "../store/auth.store";
 import { Visibility, VisibilityOff } from "@mui/icons-material";
 
+// Login page component
 export default function Login() {
+
+    // State for email input
     const [email, setEmail] = useState("");
+
+    // State for password input
     const [password, setPassword] = useState("");
+
+    // State to show loading state while API request is in progress
     const [loading, setLoading] = useState(false);
+
+    // State to toggle password visibility
     const [showPassword, setShowPassword] = useState(false);
+
+    // React Router navigation function
     const navigate = useNavigate();
+
+    // Login function from auth store to save user & token globally
     const login = useAuthStore((s) => s.login);
+
+    // State to store validation errors returned from backend
     const [errors, setErrors] = useState<Record<string, string>>({});
 
+    // Handles login button click
     const handleSubmit = async () => {
-        setLoading(true);
-        setErrors({});
+        setLoading(true);   // Start loading
+        setErrors({});      // Clear previous errors
 
         try {
+            // Call backend login API
             const res = await fetchClient("/auth/login", {
                 method: "POST",
                 body: JSON.stringify({ email, password })
-            })
-            
+            });
+
+            // Save user data & token in global auth store
             login(res.data.user, res.data.token);
-            navigate("/");
+
+            // Redirect user to feed page after successful login
+            navigate("/feed", { replace: true });
         }
         catch (err: any) {
+            // Handle backend validation errors (422)
             if (err.statusCode === 422 && err.errors) {
                 const fieldErrors: Record<string, string> = {};
 
+                // Convert backend error format to UI-friendly format
                 Object.entries(err.errors).forEach(([field, messages]: any) => {
                     fieldErrors[field] = messages[0]; // show first error
                 });
 
                 setErrors(fieldErrors);
             } else {
+                // Generic error fallback
                 alert(err.message || "Something went wrong");
             }
         }
         finally {
+            // Stop loading regardless of success or failure
             setLoading(false);
         }
-    }
+    };
 
     return (
+        // Full screen gradient background
         <div className="flex items-center justify-center p-5 min-h-screen bg-gradient-to-br from-[#667eea] to-[#764ba2]">
+
+            {/* Centered container */}
             <Container maxWidth="sm">
-                <Card sx={{
-                    borderRadius: 3,
-                    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
-                }}>
+                <Card
+                    sx={{
+                        borderRadius: 3,
+                        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                    }}
+                >
                     <CardContent sx={{ p: 4 }}>
+
+                        {/* Header section */}
                         <div className="text-center mb-8">
-                            <h1 className="text-[32px] font-[700] text-[#333] mb-8">Welcome Back</h1>
-                            <p className="text-[#666] text-[14px]">Sign in to your account</p>
+                            <h1 className="text-[32px] font-[700] text-[#333] mb-8">
+                                Welcome Back
+                            </h1>
+                            <p className="text-[#666] text-[14px]">
+                                Sign in to your account
+                            </p>
                         </div>
+
+                        {/* Login form */}
                         <div className="flex flex-col gap-6">
+
+                            {/* Email input */}
                             <TextField
                                 label="Email"
                                 fullWidth
@@ -75,6 +122,8 @@ export default function Login() {
                                     }
                                 }}
                             />
+
+                            {/* Password input with visibility toggle */}
                             <TextField
                                 label="Password"
                                 type={showPassword ? "text" : "password"}
@@ -110,6 +159,8 @@ export default function Login() {
                                     }
                                 }}
                             />
+
+                            {/* Login button */}
                             <Button
                                 fullWidth
                                 variant="contained"
@@ -132,6 +183,8 @@ export default function Login() {
                                 {loading ? 'Signing in...' : 'Sign In'}
                             </Button>
                         </div>
+
+                        {/* Register redirect */}
                         <div className="text-center mt-8">
                             <p className="text-[#666] text-[14px]">
                                 Don't have an account?{' '}
@@ -140,9 +193,10 @@ export default function Login() {
                                 </Link>
                             </p>
                         </div>
+
                     </CardContent>
                 </Card>
             </Container>
         </div>
-    )
+    );
 }

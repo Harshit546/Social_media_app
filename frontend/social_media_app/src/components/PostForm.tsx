@@ -1,38 +1,87 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { fetchClient } from "../api/fetchClient";
 import { Button, TextField, Card, CardContent } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 
-export default function PostForm({ onPostCreated }: any) {
+/**
+ * PostForm
+ * Form component used to create a new post.
+ *
+ * Features:
+ * - Text content submission
+ * - Optional thumbnail image upload
+ * - Uses multipart/form-data via FormData
+ * - Notifies parent component after successful creation
+ *
+ * Props:
+ * - onPostCreated?: callback to refresh posts/feed
+ */
+export default function PostForm({ onPostCreated }: { onPostCreated?: () => void }) {
+    /**
+     * Text content of the post
+     */
     const [content, setContent] = useState("");
+
+    /**
+     * Thumbnail image file (optional)
+     */
+    const [thumbnail, setThumbnail] = useState<File | null>(null);
+
+    /**
+     * Loading state to prevent duplicate submissions
+     */
     const [loading, setLoading] = useState(false);
 
+    /**
+     * Handles post submission
+     * - Validates at least content or image is present
+     * - Sends multipart/form-data request
+     */
     const submitPost = async () => {
-        if (!content.trim()) {
-            return;
-        }
+        // Prevent empty post (no text AND no image)
+        if (!content.trim() && !thumbnail) return;
 
         setLoading(true);
         try {
+            /**
+             * FormData is required for file uploads.
+             * Do NOT manually set Content-Type header.
+             */
+            const formData = new FormData();
+            formData.append("content", content);
+
+            if (thumbnail) {
+                formData.append("thumbnail", thumbnail);
+            }
+
+            // Create post API call
             await fetchClient("/posts", {
                 method: "POST",
-                body: JSON.stringify({ content })
-            })
+                body: formData,
+            });
+
+            // Reset form after successful submission
             setContent("");
-            onPostCreated();
+            setThumbnail(null);
+
+            // Notify parent component (e.g. refresh feed)
+            onPostCreated?.();
         } finally {
             setLoading(false);
         }
-    }
+    };
 
     return (
-        <Card sx={{
-            borderRadius: 3,
-            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.08)',
-            marginBottom: 3,
-        }}>
+        <Card
+            sx={{
+                borderRadius: 3,
+                boxShadow: "0 4px 15px rgba(0,0,0,0.08)",
+                marginBottom: 3,
+            }}
+        >
             <CardContent sx={{ p: 3 }}>
                 <div className="flex flex-col gap-4">
+                    {/* Post Content Input */}
                     <TextField
                         fullWidth
                         multiline
@@ -41,38 +90,55 @@ export default function PostForm({ onPostCreated }: any) {
                         value={content}
                         onChange={(e) => setContent(e.target.value)}
                         sx={{
-                            '& .MuiOutlinedInput-root': {
+                            "& .MuiOutlinedInput-root": {
                                 borderRadius: 2,
-                                backgroundColor: '#f8f9fa',
-                                '& fieldset': { borderColor: '#e0e0e0' },
-                                '&:hover fieldset': { borderColor: '#667eea' },
-                                '&.Mui-focused fieldset': { borderColor: '#667eea' }
-                            }
+                                backgroundColor: "#f8f9fa",
+                                "& fieldset": { borderColor: "#e0e0e0" },
+                                "&:hover fieldset": { borderColor: "#667eea" },
+                                "&.Mui-focused fieldset": {
+                                    borderColor: "#667eea",
+                                },
+                            },
                         }}
                     />
+
+                    {/* Thumbnail Image Input */}
+                    <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) =>
+                            setThumbnail(
+                                e.target.files ? e.target.files[0] : null
+                            )
+                        }
+                    />
+
+                    {/* Submit Button */}
                     <Button
                         variant="contained"
                         onClick={submitPost}
-                        disabled={loading || !content.trim()}
+                        disabled={loading || (!content.trim() && !thumbnail)}
                         endIcon={<SendIcon />}
                         sx={{
-                            background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-                            padding: '10px 24px',
+                            background:
+                                "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
+                            padding: "10px 24px",
                             borderRadius: 2,
                             fontWeight: 600,
-                            textTransform: 'none',
+                            textTransform: "none",
                             fontSize: 15,
-                            '&:hover': {
-                                boxShadow: '0 6px 20px rgba(102, 126, 234, 0.4)',
-                                transform: 'translateY(-2px)'
+                            "&:hover": {
+                                boxShadow:
+                                    "0 6px 20px rgba(102,126,234,0.4)",
+                                transform: "translateY(-2px)",
                             },
-                            transition: 'all 0.3s ease'
+                            transition: "all 0.3s ease",
                         }}
                     >
-                        {loading ? 'Posting...' : 'Share Post'}
+                        {loading ? "Posting..." : "Share Post"}
                     </Button>
                 </div>
             </CardContent>
         </Card>
-    )
+    );
 }

@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom'
 import './App.css'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -11,10 +11,14 @@ function App() {
     <>
       <BrowserRouter>
         <Routes>
-          <Route path='/login' element={<Login/>} />
+          {/* Redirect root to login page */}
+          <Route path='/' element={<Navigate to="/login" replace />} />
+          <Route path='/login' element={<Login />} />
           <Route path='/register' element={<Register />} />
-          <Route path='/' element={<ProtectedRoute><Feed /></ProtectedRoute>} />
+          <Route path='/feed' element={<ProtectedRoute><Feed /></ProtectedRoute>} />
           <Route path='/edit/:id' element={<ProtectedRoute><EditPost /></ProtectedRoute>} />
+          {/* Catch-all: redirect unknown routes to login */}
+          <Route path='*' element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
     </>

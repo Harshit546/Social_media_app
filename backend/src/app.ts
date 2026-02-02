@@ -1,10 +1,15 @@
+/**
+ * Express App Configuration
+ * Main application setup that configures middleware, routes, and error handling
+ */
+
 import 'express-async-errors'
 import express from "express"
 import cors from "cors"
 import routes from "./routes"
 import { errorHandler } from "./middlewares/error.middleware";
 import { validateRequestBody } from "./middlewares/validation.middleware";
-import postRoutes from "./routes/post.routes";
+import path from "path";
 
 const app = express();
 
@@ -12,7 +17,7 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// CORS configuration
+// CORS configuration - allow requests from frontend
 const corsOptions = {
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     credentials: true,
@@ -20,13 +25,14 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Request body validation middleware (skip for GET, DELETE)
+// Request body validation middleware
 app.use(validateRequestBody);
 
 app.use("/api", routes);
-app.use("/api/posts", postRoutes)
 
-// Error handling middleware (must be last)
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
+// Global error handler - must be last
 app.use(errorHandler);
 
 export default app;

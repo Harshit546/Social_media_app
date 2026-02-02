@@ -1,64 +1,108 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { fetchClient } from "../api/fetchClient";
-import { Button, Card, CardContent, TextField, Container, InputAdornment, IconButton } from "@mui/material";
+import {
+    Button,
+    Card,
+    CardContent,
+    TextField,
+    Container,
+    InputAdornment,
+    IconButton
+} from "@mui/material";
 import { Visibility, VisibilityOff } from "@mui/icons-material";
 import { useAuthStore } from "../store/auth.store";
-// import { registerSchema } from "../validations/auth.schema";
 
+// Registration page component
 export default function Register() {
+
+    // State for email input
     const [email, setEmail] = useState("");
+
+    // State for password input
     const [password, setPassword] = useState("");
+
+    // State to disable button and show loading text
     const [loading, setLoading] = useState(false);
+
+    // State to toggle password visibility
     const [showPassword, setShowPassword] = useState(false);
+
+    // React Router navigation function
     const navigate = useNavigate();
+
+    // Login method from auth store 
     const login = useAuthStore((s) => s.login);
+
+    // State to store field-level validation errors
     const [errors, setErrors] = useState<Record<string, string>>({});
 
+    // Handles register button click
     const handleSubmit = async () => {
-        setLoading(true);
-        setErrors({});
+        setLoading(true);      // Start loading
+        setErrors({});         // Reset previous errors
 
         try {
+            // Call backend register API
             await fetchClient("/auth/register", {
                 method: "POST",
                 body: JSON.stringify({ email, password })
             });
 
-            navigate("/");
+            // Redirect user to login page after successful registration
+            navigate("/login", { replace: true });
+
         } catch (err: any) {
+            // Handle backend validation errors (422 Unprocessable Entity)
             if (err.statusCode === 422 && err.errors) {
                 const fieldErrors: Record<string, string> = {};
 
+                // Convert backend error format to UI-friendly format
                 Object.entries(err.errors).forEach(([field, messages]: any) => {
-                    fieldErrors[field] = messages[0]; // show first error
+                    fieldErrors[field] = messages[0]; // show first error only
                 });
 
                 setErrors(fieldErrors);
             } else {
+                // Generic error fallback
                 alert(err.message || "Something went wrong");
             }
         } finally {
+            // Stop loading regardless of success or failure
             setLoading(false);
         }
     };
 
-
     return (
+        // Full screen gradient background
         <div className="flex items-center justify-center p-5 min-h-screen bg-gradient-to-br from-[#667eea] to-[#764ba2]">
+
+            {/* Container to center the card */}
             <Container maxWidth="sm">
-                <Card sx={{
-                    borderRadius: 3,
-                    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
-                    overflow: 'hidden',
-                    background: 'white'
-                }}>
+                <Card
+                    sx={{
+                        borderRadius: 3,
+                        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+                        overflow: 'hidden',
+                        background: 'white'
+                    }}
+                >
                     <CardContent sx={{ p: 4 }}>
+
+                        {/* Header section */}
                         <div className="text-center mb-8">
-                            <h1 className="text-[32px] font-[700] text-[#333] mb-8">Join Us</h1>
-                            <p className="text-[#666] text-[14px]">Create a new account to get started</p>
+                            <h1 className="text-[32px] font-[700] text-[#333] mb-8">
+                                Join Us
+                            </h1>
+                            <p className="text-[#666] text-[14px]">
+                                Create a new account to get started
+                            </p>
                         </div>
+
+                        {/* Form fields */}
                         <div className="flex flex-col gap-6">
+
+                            {/* Email input */}
                             <TextField
                                 label="Email"
                                 fullWidth
@@ -76,6 +120,8 @@ export default function Register() {
                                     }
                                 }}
                             />
+
+                            {/* Password input with visibility toggle */}
                             <TextField
                                 label="Password"
                                 type={showPassword ? "text" : "password"}
@@ -111,6 +157,8 @@ export default function Register() {
                                     }
                                 }}
                             />
+
+                            {/* Submit button */}
                             <Button
                                 fullWidth
                                 variant="contained"
@@ -133,6 +181,8 @@ export default function Register() {
                                 {loading ? 'Creating account...' : 'Create Account'}
                             </Button>
                         </div>
+
+                        {/* Login redirect */}
                         <div className="text-center mt-8">
                             <p className="text-[#666] text-[14px]">
                                 Already have an account?{' '}
@@ -141,9 +191,10 @@ export default function Register() {
                                 </Link>
                             </p>
                         </div>
+
                     </CardContent>
                 </Card>
             </Container>
         </div>
-    )
+    );
 }
