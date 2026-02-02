@@ -1,13 +1,17 @@
 import jwt, { JwtPayload } from "jsonwebtoken"
-import { ApiError } from "./apiError";
+import { ApiError } from "./errors";
 
-const JWT_SECRET: string = process.env.JWT_SECRET || "your-secret-key";
-
+// Require JWT_SECRET - fail if not set
 if (!process.env.JWT_SECRET) {
-    console.warn("JWT_SECRET environment variable is not set, using default");
+    console.error("❌ JWT_SECRET environment variable is not set");
+    console.error("Please create a .env file with JWT_SECRET=your_secret_key");
+    process.exit(1);
 }
 
-export const signJwt = (payload: object, expiresIn: string = "1h"): string => {
+const JWT_SECRET: string = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN: string = process.env.JWT_EXPIRES_IN || "24h";
+
+export const signJwt = (payload: object, expiresIn: string = JWT_EXPIRES_IN): string => {
     try {
         return jwt.sign(payload, JWT_SECRET, { expiresIn } as any);
     } catch (error) {

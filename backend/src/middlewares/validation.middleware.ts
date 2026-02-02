@@ -6,7 +6,8 @@ import { BadRequestError } from "../utils/errors";
  */
 export const validateRequestBody = (req: Request, _res: Response, next: NextFunction) => {
     try {
-        if (req.method !== "GET" && req.method !== "DELETE") {
+        // Skip validation for GET, DELETE, and PATCH (no body required)
+        if (req.method !== "GET" && req.method !== "DELETE" && req.method !== "PATCH") {
             if (!req.body || Object.keys(req.body).length === 0) {
                 throw new BadRequestError("Request body cannot be empty");
             }

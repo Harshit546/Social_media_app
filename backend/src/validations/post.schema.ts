@@ -1,9 +1,9 @@
 export const createPostRules = {
-    content: 'sometimes|min:1|max:500'
+    content: 'required|min:1|max:500'
 };
 
 export const updatePostRules = {
-    content: 'sometimes|min:1|max:500'
+    content: 'required|min:1|max:500'
 };
 
 export const postMessages = {

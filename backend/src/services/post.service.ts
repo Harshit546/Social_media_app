@@ -2,21 +2,14 @@ import Post, { IPost } from "../models/post.model";
 import { Types } from "mongoose";
 import { NotFoundError, ForbiddenError, DatabaseError, BadRequestError } from "../utils/errors";
 
-const populatePost = (post: IPost) =>
-    post.populate([
-        { path: "user", select: "email" },
-        { path: "comments.user", select: "email" }
-    ]);
-
-export const createPost = async (userId: Types.ObjectId, content: string, images?: string[]): Promise<IPost> => {
+export const createPost = async (userId: Types.ObjectId, content: string): Promise<IPost> => {
     try {
         if (!userId) {
             throw new BadRequestError("User ID is required");
         }
 
         const post = await Post.create({
-            content: content || undefined,
-            images: images || [],
+            content,
             user: userId
         });
 
@@ -32,20 +25,33 @@ export const createPost = async (userId: Types.ObjectId, content: string, images
     }
 };
 
-export const getAllPosts = async (): Promise<IPost[]> => {
+export const getAllPosts = async (page: number = 1, limit: number = 5): Promise<{ posts: IPost[]; total: number; pages: number }> => {
     try {
-        const posts = await Post.find()
-            .populate({ path: "user", select: "email", match: { isDeleted: false } })
-            .populate({ path: "comments.user", select: "email" })
-            .sort({ createdAt: -1 });
+        // Validate pagination parameters
+        const pageNum = Math.max(1, page);
+        const limitNum = 5; // Always 5 posts per page
+        const skip = (pageNum - 1) * limitNum;
 
-        return posts;
+        // Get total count and paginated posts (excluding deleted posts)
+        const [posts, total] = await Promise.all([
+            Post.find({ isDeleted: false })
+                .populate({ path: "user", select: "email", match: { isDeleted: false } })
+                .populate({ path: "comments.user", select: "email" })
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limitNum),
+            Post.countDocuments({ isDeleted: false })
+        ]);
+
+        const pages = Math.ceil(total / limitNum);
+
+        return { posts, total, pages };
     } catch (error: any) {
         throw new DatabaseError("Failed to retrieve posts");
     }
 };
 
-export const updatePost = async (postId: string, userId: Types.ObjectId, content: string, images?: string[]): Promise<IPost> => {
+export const updatePost = async (postId: string, userId: Types.ObjectId, content: string): Promise<IPost> => {
     try {
         if (!postId || !Types.ObjectId.isValid(postId)) {
             throw new BadRequestError("Invalid post ID");
@@ -57,7 +63,7 @@ export const updatePost = async (postId: string, userId: Types.ObjectId, content
 
         const post = await Post.findById(postId);
 
-        if (!post) {
+        if (!post || post.isDeleted) {
             throw new NotFoundError("Post");
         }
 
@@ -65,10 +71,7 @@ export const updatePost = async (postId: string, userId: Types.ObjectId, content
             throw new ForbiddenError("You can only edit your own posts");
         }
 
-        post.content = content || post.content;
-        if (images) {
-            post.images = images;
-        }
+        post.content = content;
 
         const updatedPost = await post.save();
         return updatedPost;
@@ -103,7 +106,9 @@ export const deletePost = async (postId: string, userId: Types.ObjectId): Promis
             throw new ForbiddenError("You can only delete your own posts");
         }
 
-        await post.deleteOne();
+        // Soft delete: mark as deleted instead of removing
+        post.isDeleted = true;
+        await post.save();
     } catch (error: any) {
         if (error instanceof NotFoundError || error instanceof ForbiddenError || error instanceof BadRequestError) {
             throw error;
@@ -122,19 +127,23 @@ export const toggleLike = async (postId: string, userId: Types.ObjectId): Promis
         }
 
         const post = await Post.findById(postId);
-        if (!post) {
+        if (!post || post.isDeleted) {
             throw new NotFoundError("Post");
         }
 
         const alreadyLiked = post.likes.some(l => l.toString() === userId.toString());
         if (alreadyLiked) {
-            post.likes = post.likes.filter(l => l.toString() !== userId.toString()) as any;
+            post.likes = post.likes.filter(l => l.toString() !== userId.toString());
         } else {
             post.likes.push(new Types.ObjectId(userId));
         }
 
         const updated = await post.save();
-        await populatePost(updated);
+        await updated.populate([
+            { path: "user", select: "email" },
+            { path: "comments.user", select: "email" },
+            { path: "likes", select: "email" }
+        ]);
         return updated;
     } catch (error: any) {
         if (error instanceof NotFoundError || error instanceof BadRequestError) {
@@ -157,16 +166,18 @@ export const addComment = async (postId: string, userId: Types.ObjectId, content
         }
 
         const post = await Post.findById(postId);
-        if (!post) {
+        if (!post || post.isDeleted) {
             throw new NotFoundError("Post");
         }
 
-        const comment = { user: userId, content };
         post.comments.push({ user: userId, content } as any);
 
         const updated = await post.save();
-        await populatePost(updated);
-        // return the newly added comment (last item)
+        await updated.populate([
+            { path: "user", select: "email" },
+            { path: "comments.user", select: "email" },
+            { path: "likes", select: "email" }
+        ]);
         const newComment = updated.comments[updated.comments.length - 1];
         return { post: updated, comment: newComment };
     } catch (error: any) {
@@ -190,7 +201,7 @@ export const deleteComment = async (postId: string, commentId: string, userId: T
         }
 
         const post = await Post.findById(postId);
-        if (!post) {
+        if (!post || post.isDeleted) {
             throw new NotFoundError("Post");
         }
 
@@ -208,7 +219,11 @@ export const deleteComment = async (postId: string, commentId: string, userId: T
 
         post.comments = post.comments.filter(c => c._id?.toString() !== commentId);
         const updated = await post.save();
-        await populatePost(updated);
+        await updated.populate([
+            { path: "user", select: "email" },
+            { path: "comments.user", select: "email" },
+            { path: "likes", select: "email" }
+        ]);
         return updated;
     } catch (error: any) {
         if (error instanceof NotFoundError || error instanceof BadRequestError || error instanceof ForbiddenError) {

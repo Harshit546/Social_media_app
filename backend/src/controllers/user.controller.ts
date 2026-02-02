@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { softDeleteUser } from "../services/user.service";
-import { ApiError } from "../utils/apiError";
-import { BadRequestError } from "../utils/errors";
+import { ApiError, BadRequestError } from "../utils/errors";
 
 export const deleteAccount = async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -37,6 +37,7 @@ export default function PostCard({ post: initialPost }: any) {
     const deletePost = async () => {
         if (window.confirm("Are you sure you want to delete this post?")) {
             await fetchClient(`/posts/${post._id}`, { method: "DELETE" });
+            if (props.onDelete) props.onDelete(post._id);
             window.location.reload();
         }
     };
@@ -58,7 +59,7 @@ export default function PostCard({ post: initialPost }: any) {
         }
         setLoadingLike(true);
         try {
-            const res = await fetchClient(`/posts/${post._id}/like`, { method: "POST" });
+            const res = await fetchClient(`/posts/${post._id}/like`, { method: "PATCH" });
             const updated = normalizeResponsePost(res);
             if (updated) setPost(updated);
         } catch (err: any) {

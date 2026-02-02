@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { ApiError } from "../utils/apiError";
+import { ApiError } from "../utils/errors";
 
 interface ErrorResponse {
     success: false;
@@ -14,10 +14,13 @@ export const errorHandler = (err: any, _req: Request, res: Response, _next: Next
     let message = "Internal server error";
     let errors: Record<string, any> | undefined;
 
-    // Handle custom ApiError
+    // Handle custom ApiError (from errors.ts)
     if (err instanceof ApiError) {
         statusCode = err.statusCode;
         message = err.message;
+        if (err.validationErrors) {
+            errors = err.validationErrors;
+        }
     }
     // Handle validation errors from validatorjs
     else if (err.validationErrors) {
@@ -54,6 +57,20 @@ export const errorHandler = (err: any, _req: Request, res: Response, _next: Next
     else if (err.name === "CastError") {
         statusCode = 400;
         message = "Invalid ID format";
+    }
+    // Handle payload too large errors
+    else if (err.type === "entity.too.large") {
+        statusCode = 413;
+        message = "Request payload too large";
+    }
+    // Handle MongoDB duplicate key errors
+    else if (err.code === 11000) {
+        statusCode = 409;
+        message = "Duplicate entry";
+        const field = Object.keys(err.keyValue || {})[0];
+        if (field) {
+            errors = { [field]: `${field} already exists` };
+        }
     }
     // Handle file upload errors (multer)
     // else if (err.name === "MulterError") {

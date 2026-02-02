@@ -14,12 +14,12 @@ export default function PostForm({ onPostCreated }: any) {
 
         setLoading(true);
         try {
-            const post = await fetchClient("/posts", {
+            await fetchClient("/posts", {
                 method: "POST",
                 body: JSON.stringify({ content })
             })
             setContent("");
-            onPostCreated(post);
+            onPostCreated();
         } finally {
             setLoading(false);
         }

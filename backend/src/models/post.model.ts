@@ -10,9 +10,9 @@ export interface IComment {
 export interface IPost extends Document {
     user: Types.ObjectId;
     content: string;
-    images?: string[];
     likes: Types.ObjectId[];
     comments: IComment[];
+    isDeleted: boolean;
     createdAt: Date;
     updatedAt: Date;
     likesCount?: number;
@@ -31,9 +31,9 @@ const postSchema = new Schema<IPost>(
     {
         user: { type: Schema.Types.ObjectId, ref: "User", required: true },
         content: { type: String, required: true, trim: true, maxLength: 500 },
-        images: [{ type: String }],
         likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
-        comments: { type: [commentSchema], default: [] }
+        comments: { type: [commentSchema], default: [] },
+        isDeleted: { type: Boolean, default: false }
     },
     { timestamps: true }
 );
