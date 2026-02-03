@@ -1,35 +1,10 @@
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import type { Request, Response, NextFunction } from "express";
+import { uploadToS3 } from "../utils/s3";
 
-// Ensure uploads directory exists
-const uploadDir = "uploads";
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Storage config for local storage
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        // Verify directory exists before writing
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        cb(null, uploadDir);
-    },
-    filename: function (req, file, cb) {
-        try {
-            // Example: post-12345-1678912345.jpg
-            const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-            const ext = path.extname(file.originalname);
-            const filename = `post-${uniqueSuffix}${ext}`;
-            cb(null, filename);
-        } catch (err: any) {
-            cb(err);
-        }
-    }
-});
+// Use memory storage to hold file in buffer before uploading to S3
+const storage = multer.memoryStorage();
 
 // File filter for images only
 const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: any) => {
@@ -59,6 +34,30 @@ export const upload = multer({
         fileSize: 5 * 1024 * 1024 // 5MB max
     }
 });
+
+/**
+ * Middleware to handle S3 upload after multer processes the file
+ * Attaches S3 URL to req.file.filename for compatibility
+ */
+export const handleS3Upload = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        if (req.file) {
+            // Upload file buffer to S3
+            const s3Url = await uploadToS3(
+                req.file.buffer,
+                req.file.originalname,
+                req.file.mimetype
+            );
+            
+            // Store S3 URL as filename for compatibility with existing code
+            req.file.filename = s3Url;
+        }
+        
+        next();
+    } catch (error) {
+        next(error);
+    }
+};
 
 // Export error handler for multer errors
 export const handleUploadError = (err: any, req: Request, res: Response, next: NextFunction) => {

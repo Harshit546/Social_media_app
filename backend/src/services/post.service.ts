@@ -13,14 +13,13 @@
 
 import Post, { IPost } from "../models/post.model";
 import { Types } from "mongoose";
-import fs from "fs";
-import path from "path";
 import {
     NotFoundError,
     ForbiddenError,
     DatabaseError,
     BadRequestError
 } from "../utils/errors";
+import { deleteFromS3 } from "../utils/s3";
 
 /**
  * Create a new post
@@ -223,21 +222,18 @@ export const updatePost = async (
         // Apply update with validation
         post.content = trimmedContent;
 
-        // If a new thumbnail filename is provided and differs from current, attempt to remove the old file from disk to avoid orphaned files.
+        // If a new thumbnail URL is provided and differs from current, delete the old one from S3
         if (thumbnailUrl !== undefined && thumbnailUrl !== null) {
             const newThumb = String(thumbnailUrl || "");
             const oldThumb = post.thumbnail || "";
 
             if (newThumb && oldThumb && newThumb !== oldThumb) {
                 try {
-                    const uploadsDir = path.join(__dirname, "../../uploads");
-                    const oldPath = path.join(uploadsDir, oldThumb);
-                    if (fs.existsSync(oldPath)) {
-                        fs.unlinkSync(oldPath);
-                    }
+                    // Delete old thumbnail from S3
+                    await deleteFromS3(oldThumb);
                 } catch (delErr) {
-                    // Log but don't fail the update just because cleanup failed
-                    console.warn("Failed to remove old thumbnail:", delErr);
+                    // Log but don't fail the update if S3 cleanup fails
+                    console.warn("Failed to remove old thumbnail from S3:", delErr);
                 }
             }
 
@@ -298,6 +294,16 @@ export const deletePost = async (
         // Authorization check
         if (post.user.toString() !== userId.toString()) {
             throw new ForbiddenError("You can only delete your own posts");
+        }
+
+        // Delete thumbnail from S3 if it exists
+        if (post.thumbnail) {
+            try {
+                await deleteFromS3(post.thumbnail);
+            } catch (delErr) {
+                // Log but don't fail the delete if S3 cleanup fails
+                console.warn("Failed to remove thumbnail from S3:", delErr);
+            }
         }
 
         // Soft delete instead of permanent removal

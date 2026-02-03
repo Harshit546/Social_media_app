@@ -113,7 +113,7 @@ export default function Navbar() {
                         </span>
 
                         {/* Action Buttons */}
-                        <div style={{ display: "flex", gap: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                             <Button
                                 color="inherit"
                                 onClick={handleDeleteAccountClick}
@@ -121,10 +121,7 @@ export default function Navbar() {
                                 sx={{
                                     fontWeight: 600,
                                     color: "#ffcdd2",
-                                    "&:hover": {
-                                        backgroundColor: "rgba(255, 77, 77, 0.2)",
-                                        transform: "scale(1.05)",
-                                    },
+                                    "&:hover": { backgroundColor: "rgba(255,77,77,0.2)", transform: "scale(1.05)" },
                                     transition: "all 0.3s ease",
                                 }}
                             >
@@ -137,10 +134,7 @@ export default function Navbar() {
                                 endIcon={<LogoutIcon />}
                                 sx={{
                                     fontWeight: 600,
-                                    "&:hover": {
-                                        backgroundColor: "rgba(255,255,255,0.1)",
-                                        transform: "scale(1.05)",
-                                    },
+                                    "&:hover": { backgroundColor: "rgba(255,255,255,0.1)", transform: "scale(1.05)" },
                                     transition: "all 0.3s ease",
                                 }}
                             >

@@ -13,7 +13,7 @@
 import { Router } from "express";
 import * as postController from "../controllers/post.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
-import { upload, handleUploadError } from "../middlewares/multer.middleware";
+import { upload, handleUploadError, handleS3Upload } from "../middlewares/multer.middleware";
 
 const router = Router();
 
@@ -22,9 +22,10 @@ router.get("/", postController.getAllPosts);
 
 // Post CRUD (requires authentication)
 // Use multer to handle optional `thumbnail` file upload on create and update
-router.post("/", authMiddleware, upload.single("thumbnail"), handleUploadError, postController.createPost);
+// handleS3Upload middleware uploads file to S3 and stores URL in req.file.filename
+router.post("/", authMiddleware, upload.single("thumbnail"), handleS3Upload, handleUploadError, postController.createPost);
 router.get("/:id", postController.getPost);
-router.put("/:id", authMiddleware, upload.single("thumbnail"), handleUploadError, postController.updatePost);
+router.put("/:id", authMiddleware, upload.single("thumbnail"), handleS3Upload, handleUploadError, postController.updatePost);
 router.delete("/:id", authMiddleware, postController.deletePost);
 
 // Likes

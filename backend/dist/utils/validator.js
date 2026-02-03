@@ -1,26 +1,36 @@
 "use strict";
+/**
+ * Validation Utility Module
+ *
+ * Purpose:
+ * - Provides a wrapper around ValidatorJS for consistent data validation
+ * - Supports custom rules (e.g., password complexity)
+ * - Returns structured errors or throws exceptions for controllers
+ *
+ * Features:
+ * 1. validate() – returns ValidationResult with valid flag and errors
+ * 2. validateOrThrow() – throws Error with validation errors if invalid
+ * 3. Custom rules: uppercase, lowercase, digit, special character
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateOrThrow = exports.validate = void 0;
 const Validator = require('validatorjs');
-// Custom validation rules for password complexity
-Validator.register('uppercase', (value) => {
-    return /[A-Z]/.test(value);
-}, 'The :attribute must contain at least 1 uppercase letter');
-Validator.register('lowercase', (value) => {
-    return /[a-z]/.test(value);
-}, 'The :attribute must contain at least 1 lowercase letter');
-Validator.register('numeric', (value) => {
-    return /[0-9]/.test(value);
-}, 'The :attribute must contain at least 1 digit');
-Validator.register('special', (value) => {
-    return /[^A-Za-z0-9]/.test(value);
-}, 'The :attribute must contain at least 1 special character');
+// CUSTOM PASSWORD VALIDATION RULES
+/** Password must contain at least one uppercase letter */
+Validator.register('uppercase', (value) => /[A-Z]/.test(value), 'The :attribute must contain at least 1 uppercase letter');
+/** Password must contain at least one lowercase letter */
+Validator.register('lowercase', (value) => /[a-z]/.test(value), 'The :attribute must contain at least 1 lowercase letter');
+/** Password must contain at least one digit */
+Validator.register('digit', (value) => /[0-9]/.test(value), 'The :attribute must contain at least 1 digit');
+/** Password must contain at least one special character */
+Validator.register('special', (value) => /[^A-Za-z0-9]/.test(value), 'The :attribute must contain at least 1 special character');
+// VALIDATION FUNCTIONS
 /**
  * Validate data against defined rules
- * @param data - Data to validate
- * @param rules - Validation rules
- * @param messages - Custom error messages (optional)
- * @returns ValidationResult
+ * @param data - object containing data to validate
+ * @param rules - validation rules (e.g., { email: 'required|email' })
+ * @param messages - optional custom error messages
+ * @returns ValidationResult with valid flag and errors
  */
 const validate = (data, rules, messages) => {
     const validator = new Validator(data, rules, messages);
@@ -37,11 +47,12 @@ const validate = (data, rules, messages) => {
 };
 exports.validate = validate;
 /**
- * Throws an error if validation fails
- * @param data - Data to validate
- * @param rules - Validation rules
- * @param messages - Custom error messages (optional)
- * @throws Error with validation errors
+ * Validate data and throw an Error if validation fails
+ * - Recommended for use in controllers
+ * @param data - object to validate
+ * @param rules - validation rules
+ * @param messages - optional custom messages
+ * @throws Error with combined validation messages and validationErrors property
  */
 const validateOrThrow = (data, rules, messages) => {
     const result = (0, exports.validate)(data, rules, messages);
@@ -50,7 +61,7 @@ const validateOrThrow = (data, rules, messages) => {
             .map(([field, msgs]) => `${field}: ${msgs.join(', ')}`)
             .join('; ');
         const error = new Error(errorMessage);
-        error.validationErrors = result.errors;
+        error.validationErrors = result.errors; // attach detailed errors
         throw error;
     }
 };

@@ -1,28 +1,59 @@
 "use strict";
+/**
+ * Central Error Handling Middleware
+ *
+ * Catches and formats all errors occurring in the Express application.
+ * Returns structured JSON responses with:
+ * - success: false
+ * - message: human-readable message
+ * - statusCode: HTTP status code
+ * - errors: optional detailed validation errors
+ * - timestamp: ISO timestamp of error
+ *
+ * Handles:
+ * - Custom ApiError (from errors.ts)
+ * - ValidatorJS validation errors
+ * - SyntaxError (invalid JSON)
+ * - Mongoose/MongoDB errors
+ * - Payload too large
+ * - Duplicate key errors
+ * - Generic JS errors
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.errorHandler = void 0;
-const apiError_1 = require("../utils/apiError");
+const errors_1 = require("../utils/errors");
+/**
+ * Express error-handling middleware
+ * @param err - Error object caught by Express
+ * @param _req - Express Request object
+ * @param res - Express Response object
+ * @param _next - Express NextFunction (not used)
+ */
 const errorHandler = (err, _req, res, _next) => {
+    // Default values
     let statusCode = 500;
     let message = "Internal server error";
     let errors;
-    // Handle custom ApiError
-    if (err instanceof apiError_1.ApiError) {
+    // Handle custom API errors (from errors.ts)
+    if (err instanceof errors_1.ApiError) {
         statusCode = err.statusCode;
         message = err.message;
+        if (err.validationErrors) {
+            errors = err.validationErrors;
+        }
     }
-    // Handle validation errors from validatorjs
+    // Handle ValidatorJS validation errors
     else if (err.validationErrors) {
         statusCode = 422;
         message = "Validation failed";
         errors = err.validationErrors;
     }
-    // Handle JSON parse errors
+    // Handle invalid JSON in request body
     else if (err instanceof SyntaxError && "body" in err) {
         statusCode = 400;
         message = "Invalid JSON in request body";
     }
-    // Handle Mongoose/MongoDB errors
+    // Handle Mongoose or MongoDB errors
     else if (err.name === "MongooseError" || err.name === "MongoServerError") {
         statusCode = 500;
         message = "Database error occurred";
@@ -39,28 +70,30 @@ const errorHandler = (err, _req, res, _next) => {
             return acc;
         }, {});
     }
-    // Handle Mongoose cast errors
+    // Handle Mongoose cast errors (invalid ObjectId)
     else if (err.name === "CastError") {
         statusCode = 400;
         message = "Invalid ID format";
     }
-    // Handle file upload errors (multer)
-    else if (err.name === "MulterError") {
-        statusCode = 400;
-        if (err.code === "FILE_TOO_LARGE") {
-            message = "File is too large";
-        }
-        else if (err.code === "LIMIT_FILE_COUNT") {
-            message = "Too many files uploaded";
-        }
-        else {
-            message = "File upload error";
+    // Handle request payload too large
+    else if (err.type === "entity.too.large") {
+        statusCode = 413;
+        message = "Request payload too large";
+    }
+    // Handle MongoDB duplicate key errors
+    else if (err.code === 11000) {
+        statusCode = 409;
+        message = "Duplicate entry";
+        const field = Object.keys(err.keyValue || {})[0];
+        if (field) {
+            errors = { [field]: `${field} already exists` };
         }
     }
-    // Handle generic errors
+    // Handle generic JS errors
     else if (err instanceof Error) {
-        message = err.message;
+        message = err.message || message;
     }
+    // Build structured error response
     const response = {
         success: false,
         message,
@@ -70,13 +103,14 @@ const errorHandler = (err, _req, res, _next) => {
     if (errors) {
         response.errors = errors;
     }
-    // Log error in development
+    // Log full error details in development
     if (process.env.NODE_ENV === "development") {
         console.error({
             error: err,
             timestamp: new Date().toISOString()
         });
     }
+    // Send JSON response
     res.status(statusCode).json(response);
 };
 exports.errorHandler = errorHandler;

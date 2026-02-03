@@ -211,7 +211,7 @@ export default function EditPost() {
                                 <Box sx={{ mt: 2 }}>
                                     <p className="text-[12px] text-[#666] mb-2">Current Image:</p>
                                     <img
-                                        src={`${API_BASE}/uploads/${currentThumbnail}`}
+                                        src={currentThumbnail}
                                         alt="Current post thumbnail"
                                         style={{ maxWidth: "100%", maxHeight: "200px", borderRadius: 8 }}
                                         onError={() => setError("Failed to load current image")}

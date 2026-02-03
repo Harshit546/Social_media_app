@@ -1,4 +1,13 @@
 "use strict";
+/**
+ * Authentication Routes
+ *
+ * Handles authentication endpoints:
+ * - User registration
+ * - User login
+ *
+ * Base path: /api/auth
+ */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -36,6 +45,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const authController = __importStar(require("../controllers/auth.controller"));
 const router = (0, express_1.Router)();
+// POST /api/auth/register - register a new user
 router.post("/register", authController.register);
+// POST /api/auth/login - login an existing user
 router.post("/login", authController.login);
 exports.default = router;

@@ -12,6 +12,7 @@
  */
 
 import { JwtPayload } from "jsonwebtoken";
+import "express";
 
 declare global {
     namespace Express {
@@ -27,6 +28,13 @@ declare global {
                 role: string;
                 [key: string]: any; // Allow extra properties if needed
             };
+        };
+        namespace Multer {
+            interface File {
+                location?: string; // S3 URL
+                key?: string;
+                bucket?: string;
+            }
         }
     }
 }

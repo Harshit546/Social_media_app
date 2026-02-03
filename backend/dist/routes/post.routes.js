@@ -1,4 +1,15 @@
 "use strict";
+/**
+ * Post Routes
+ *
+ * Handles all post-related endpoints including:
+ * - CRUD for posts
+ * - Likes toggling
+ * - Adding/deleting comments
+ *
+ * Authentication is required for all modifying operations.
+ * Base path: /api/posts
+ */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -36,9 +47,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const postController = __importStar(require("../controllers/post.controller"));
 const auth_middleware_1 = require("../middlewares/auth.middleware");
+const multer_middleware_1 = require("../middlewares/multer.middleware");
 const router = (0, express_1.Router)();
+// Public route: get all posts
 router.get("/", postController.getAllPosts);
-router.post("/", auth_middleware_1.authMiddleware, postController.createPost);
-router.put("/:id", auth_middleware_1.authMiddleware, postController.updatePost);
+// Post CRUD (requires authentication)
+// Use multer to handle optional `thumbnail` file upload on create and update
+// handleS3Upload middleware uploads file to S3 and stores URL in req.file.filename
+router.post("/", auth_middleware_1.authMiddleware, multer_middleware_1.upload.single("thumbnail"), multer_middleware_1.handleS3Upload, multer_middleware_1.handleUploadError, postController.createPost);
+router.get("/:id", postController.getPost);
+router.put("/:id", auth_middleware_1.authMiddleware, multer_middleware_1.upload.single("thumbnail"), multer_middleware_1.handleS3Upload, multer_middleware_1.handleUploadError, postController.updatePost);
 router.delete("/:id", auth_middleware_1.authMiddleware, postController.deletePost);
+// Likes
+router.patch("/:id/like", auth_middleware_1.authMiddleware, postController.toggleLike);
+// Comments
+router.post("/:id/comments", auth_middleware_1.authMiddleware, postController.addComment);
+router.delete("/:id/comments/:commentId", auth_middleware_1.authMiddleware, postController.deleteComment);
 exports.default = router;

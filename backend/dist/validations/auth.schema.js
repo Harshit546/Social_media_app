@@ -1,28 +1,54 @@
 "use strict";
+/**
+ * Authentication Validation Schemas
+ *
+ * Purpose:
+ * - Define validation rules for authentication-related endpoints
+ * - Provide user-friendly error messages
+ * - Enforce strong password policies for security
+ *
+ * Endpoints Covered:
+ * 1. User Registration (/api/auth/register)
+ * 2. User Login (/api/auth/login)
+ *
+ * Notes:
+ * - Custom rules like uppercase, lowercase, digit, special ensure strong passwords
+ * - Messages are mapped to specific validation failures for clarity
+ */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loginMessages = exports.registerMessages = exports.loginRules = exports.registerRules = void 0;
+exports.loginMessages = exports.loginRules = exports.registerMessages = exports.registerRules = void 0;
+// REGISTRATION VALIDATION
 exports.registerRules = {
-    email: 'required|email',
-    password: 'required|min:8|max:32|uppercase|lowercase|numeric|special'
+    email: 'required|email|string', // Must be valid email
+    // Password requirements:
+    // - 8 to 32 characters
+    // - At least 1 uppercase letter
+    // - At least 1 lowercase letter
+    // - At least 1 digit
+    // - At least 1 special character
+    password: 'required|string|min:8|max:32|uppercase|lowercase|digit|special'
 };
-exports.loginRules = {
-    email: 'required|email',
-    password: 'required|min:8'
-};
+// Custom error messages for registration validation
 exports.registerMessages = {
     'email.required': 'Email is required',
-    'email.email': 'Invalid email',
+    'email.email': 'Invalid email format',
     'password.required': 'Password is required',
     'password.min': 'Password must be at least 8 characters',
     'password.max': 'Password must be at most 32 characters',
-    'password.uppercase': 'Password must contain 1 uppercase letter',
-    'password.lowercase': 'Password must contain 1 lowercase letter',
-    'password.numeric': 'Password must contain 1 digit',
-    'password.special': 'Password must contain 1 special character'
+    'password.uppercase': 'Password must contain at least 1 uppercase letter',
+    'password.lowercase': 'Password must contain at least 1 lowercase letter',
+    'password.digit': 'Password must contain at least 1 digit',
+    'password.special': 'Password must contain at least 1 special character'
 };
+// LOGIN VALIDATION
+exports.loginRules = {
+    email: 'required|email|string', // Must be valid email
+    password: 'required|string|min:8' // Password minimum length enforced
+};
+// Custom error messages for login validation
 exports.loginMessages = {
     'email.required': 'Email is required',
-    'email.email': 'Invalid email',
+    'email.email': 'Invalid email format',
     'password.required': 'Password is required',
     'password.min': 'Password must be at least 8 characters'
 };
