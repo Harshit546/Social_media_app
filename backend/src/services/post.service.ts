@@ -12,14 +12,25 @@
  */
 
 import Post, { IPost } from "../models/post.model";
+import { PostImage, IPostImages } from "../models/postImage.model";
+import Like from "../models/like.model";
+import Comment from "../models/comment.model";
 import { Types } from "mongoose";
 import {
     NotFoundError,
     ForbiddenError,
     DatabaseError,
-    BadRequestError
+    BadRequestError,
+    UnauthorizedError
 } from "../utils/errors";
-import { deleteFromS3 } from "../utils/s3";
+import { uploadToS3, deleteFromS3 } from "../utils/s3";
+
+const resolveFileUrl = async (file: Express.Multer.File): Promise<string> => { 
+    const maybe = (file as any).s3Url; 
+    if (typeof maybe === "string" && maybe.length > 0) 
+        return maybe; 
+    return await uploadToS3(file.buffer, file.originalname, file.mimetype); 
+};
 
 /**
  * Create a new post
@@ -31,20 +42,38 @@ import { deleteFromS3 } from "../utils/s3";
 export const createPost = async (
     userId: Types.ObjectId,
     content: string,
-    thumbnailUrl?: string
+    files?: Express.Multer.File[]
 ): Promise<IPost> => {
     try {
         // Validate required inputs
         if (!userId) {
             throw new BadRequestError("User ID is required");
         }
+        if (!content || !content.trim()) {
+            throw new BadRequestError("Post content cannot be empty");
+        }
+
+        const trimmed = content.trim();
 
         // Persist post in database
         const post = await Post.create({
-            content,
+            content: trimmed,
             user: userId,
-            thumbnail: thumbnailUrl || "",
         });
+
+        // Handle image uploads if provided 
+        if (files && files.length > 0) {
+            if (files.length > 5) {
+                throw new BadRequestError("Maximum 5 images allowed");
+            }
+
+            // Upload each image to S3 and save in PostImage table 
+            const uploads = await Promise.all(
+                files.map(f => resolveFileUrl(f))
+            );
+
+            await PostImage.create({ post: post._id, urls: uploads });
+        }
 
         return post;
     } catch (error: any) {
@@ -70,45 +99,78 @@ export const createPost = async (
  * - Excludes soft-deleted posts
  * - Populates user and comment author info
  * - Sorted newest-first (feed style)
+ * - Includes associated images from PostImage table
  *
  * @param page - Current page number (1-based)
  * @param limit - Number of posts per page (fixed internally)
+ * @param search - Optional search string
  * @returns Paginated posts with metadata
  */
-export const getAllPosts = async (
-    page: number = 1,
-    limit: number = 5
-): Promise<{ posts: IPost[]; total: number; pages: number }> => {
+export const getAllPosts = async (page: number = 1, limit: number = 10, search?: string): Promise<{ data: any[]; pagination: any }> => {
     try {
-        // Normalize pagination inputs
-        const pageNum = Math.max(1, page);
-        const limitNum = 5; // Fixed page size for consistency
-        const skip = (pageNum - 1) * limitNum;
+        // Basic validation
+        if (!page || page < 1) page = 1;
+        if (!limit || limit < 1) limit = 10;
 
-        // Fetch posts and total count in parallel
-        const [posts, total] = await Promise.all([
-            Post.find({ isDeleted: false })
-                .populate({
-                    path: "user",
-                    select: "email",
-                    match: { isDeleted: false }
-                })
-                .populate({
-                    path: "comments.user",
-                    select: "email"
-                })
-                .sort({ createdAt: -1 }) // Newest posts first
-                .skip(skip)
-                .limit(limitNum),
+        // Build base filter (exclude soft-deleted posts) 
+        const filter: any = { isDeleted: { $ne: true } };
 
-            Post.countDocuments({ isDeleted: false })
-        ]);
+        // If search provided, sanitize and apply filter 
+        if (search && typeof search === "string") {
+            const trimmed = search.trim();
 
-        const pages = Math.ceil(total / limitNum);
+            // Guard: avoid overly long search strings that could be abused 
+            if (trimmed.length > 200) { throw new BadRequestError("Search query too long"); }
 
-        return { posts, total, pages };
-    } catch (error: any) {
-        throw new DatabaseError("Failed to retrieve posts");
+            // Use text search if index exists; fallback to case-insensitive regex 
+            // Prefer text search for relevance if MongoDB text index is present 
+            // Here we attempt text search first, but also support regex fallback. 
+            // Note: text search ignores short stopwords; regex is more literal. 
+            // Use $text for better performance when index exists.
+
+            const safeRegex = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+            filter.content = { $regex: safeRegex, $options: "i" };
+        }
+
+        // Pagination: use skip/limit for now
+        const skip = (page - 1) * limit;
+
+        // Query total count (respecting filter) 
+        const total = await Post.countDocuments(filter);
+
+        // Query posts with populate for author only
+        const posts = await Post.find(filter)
+            .populate("user", "email")              // populate post author
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        if (!posts || posts.length === 0) { 
+            const totalPages = Math.max(1, Math.ceil(total / limit)); 
+            return { data: [], pagination: { page, limit, total, totalPages } }; 
+        }
+
+        // Attach images from PostImage table 
+        const postIds = posts.map(p => p._id);
+
+        // Cast the lean result to a known shape so TS knows `urls` exists
+        type PostImagesDoc = { post: Types.ObjectId; urls: string[] };
+        const images = (await PostImage.find({ post: { $in: postIds } }).lean()) as PostImagesDoc[];
+        
+        const postsWithImages = posts.map(post => { 
+            const pi = images.find(img => String(img.post) === String(post._id)); 
+            return { ...post, images: pi ? pi.urls : [] }; 
+        });
+
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+
+        return { data: postsWithImages, pagination: { page, limit, total, totalPages } };
+    }
+    catch (error: any) {
+        if (error instanceof BadRequestError) { throw error; }
+        throw new DatabaseError("Failed to fetch posts");
     }
 };
 
@@ -132,16 +194,11 @@ export const getPost = async (postId: string): Promise<IPost> => {
             throw new BadRequestError("Invalid post ID format");
         }
 
-        const post = await Post.findById(postId)
-            .populate({
-                path: "user",
-                select: "email",
-                match: { isDeleted: false }
-            })
-            .populate({
-                path: "comments.user",
-                select: "email"
-            });
+        const post = await Post.findById(postId).populate({
+            path: "user",
+            select: "email",
+            match: { isDeleted: false }
+        });
 
         if (!post) {
             throw new NotFoundError("Post");
@@ -170,39 +227,30 @@ export const getPost = async (postId: string): Promise<IPost> => {
  * @param postId - ID of the post to update
  * @param userId - ID of the authenticated user
  * @param content - Updated post content
- * @param thumbnailUrl - Optional new thumbnail filename
- * @returns Updated post document
+ * @param files - optional new image files (≤5, ≤1MB each)
+ * @param replaceMap - optional mapping of imageId → new file to replace specific images
  */
 export const updatePost = async (
     postId: string,
     userId: Types.ObjectId,
     content: string,
-    thumbnailUrl?: string
+    files?: Express.Multer.File[],
+    replaceMap?: { [index: number]: Express.Multer.File }
 ): Promise<IPost> => {
     try {
         // Validate identifiers thoroughly
-        if (!postId || typeof postId !== "string") {
-            throw new BadRequestError("Post ID must be a valid string");
-        }
-
-        if (!Types.ObjectId.isValid(postId)) {
-            throw new BadRequestError("Invalid post ID format");
-        }
+        if (!postId || !Types.ObjectId.isValid(postId)) throw new BadRequestError("Invalid post ID");
 
         if (!userId) {
             throw new BadRequestError("User ID is required for authorization");
         }
 
-        if (!content || typeof content !== "string") {
+        if (!content || !content.trim()) {
             throw new BadRequestError("Post content must be a valid string");
         }
 
         // Trim content to prevent whitespace-only updates
         const trimmedContent = content.trim();
-        if (trimmedContent.length === 0) {
-            throw new BadRequestError("Post content cannot be empty");
-        }
-
         const post = await Post.findById(postId);
 
         // Ensure post exists and is not deleted
@@ -222,24 +270,49 @@ export const updatePost = async (
         // Apply update with validation
         post.content = trimmedContent;
 
-        // If a new thumbnail URL is provided and differs from current, delete the old one from S3
-        if (thumbnailUrl !== undefined && thumbnailUrl !== null) {
-            const newThumb = String(thumbnailUrl || "");
-            const oldThumb = post.thumbnail || "";
-
-            if (newThumb && oldThumb && newThumb !== oldThumb) {
-                try {
-                    // Delete old thumbnail from S3
-                    await deleteFromS3(oldThumb);
-                } catch (delErr) {
-                    // Log but don't fail the update if S3 cleanup fails
-                    console.warn("Failed to remove old thumbnail from S3:", delErr);
-                }
-            }
-
-            post.thumbnail = newThumb;
+        let postImages = await PostImage.findOne({ post: post._id }) as IPostImages | null;
+        const hasNewFiles = Array.isArray(files) && files.length > 0; 
+        const hasReplacements = replaceMap && Object.keys(replaceMap).length > 0; 
+        
+        if (!postImages && (hasNewFiles || hasReplacements)) { 
+            postImages = new PostImage({ post: post._id, urls: [] }); 
+        } 
+        
+        // Handle replacements first (so indexes refer to original array) 
+        if (hasReplacements && postImages) { 
+            for (const [indexStr, newFile] of Object.entries(replaceMap!)) { 
+                const index = parseInt(indexStr, 10); 
+                
+                if (Number.isNaN(index)) continue; 
+                if (index < 0 || index >= postImages.urls.length) { 
+                    // ignore invalid indexes; alternatively throw BadRequestError if you prefer strict behavior 
+                    continue; 
+                } 
+                
+                // Delete old from S3 (best-effort) 
+                try { 
+                    await deleteFromS3(postImages.urls[index]); 
+                } 
+                catch (err) { 
+                    console.warn("Failed to remove old image from S3:", err); 
+                } 
+                
+                // Resolve new URL (use middleware-provided s3Url if present) 
+                const newUrl = await resolveFileUrl(newFile); postImages.urls[index] = newUrl; 
+            } 
+        } 
+        
+        // Handle appending new images 
+        if (hasNewFiles && postImages) { 
+            // total after append must be <= 5 
+            const totalAfter = postImages.urls.length + files!.length; 
+            
+            if (totalAfter > 5) throw new BadRequestError("Maximum 5 images allowed per post"); 
+            const uploads = await Promise.all(files!.map(f => resolveFileUrl(f))); 
+            postImages.urls.push(...uploads); 
         }
 
+        if (postImages) await postImages.save();
         const updatedPost = await post.save();
         return updatedPost;
     } catch (error: any) {
@@ -265,6 +338,7 @@ export const updatePost = async (
  * Notes:
  * - Post is not physically removed
  * - Preserves relationships and moderation history
+ * - Cleans up associated images from S3 and PostImage table
  *
  * Authorization:
  * - Only the post owner can delete
@@ -290,20 +364,28 @@ export const deletePost = async (
         if (!post) {
             throw new NotFoundError("Post");
         }
+        if (post.isDeleted) {
+            throw new NotFoundError("Post (already deleted)");
+        }
 
         // Authorization check
         if (post.user.toString() !== userId.toString()) {
             throw new ForbiddenError("You can only delete your own posts");
         }
 
-        // Delete thumbnail from S3 if it exists
-        if (post.thumbnail) {
-            try {
-                await deleteFromS3(post.thumbnail);
-            } catch (delErr) {
-                // Log but don't fail the delete if S3 cleanup fails
-                console.warn("Failed to remove thumbnail from S3:", delErr);
-            }
+        const postImages = await PostImage.findOne({ post: post._id }); 
+        
+        if (postImages) { 
+            for (const url of postImages.urls) { 
+                try { 
+                    await deleteFromS3(url); 
+                } 
+                catch (err) { 
+                    console.warn("Failed to remove image from S3:", err); 
+                } 
+            } 
+            
+            await postImages.deleteOne(); 
         }
 
         // Soft delete instead of permanent removal
@@ -333,55 +415,47 @@ export const deletePost = async (
  * @param userId - Authenticated user ID
  * @returns Updated post document
  */
-export const toggleLike = async (
-    postId: string,
-    userId: Types.ObjectId
-): Promise<IPost> => {
-    try {
-        if (!postId || !Types.ObjectId.isValid(postId)) {
-            throw new BadRequestError("Invalid post ID");
-        }
+export const toggleLike = async (postId: string, userId: Types.ObjectId) => {
+    if (!postId || !Types.ObjectId.isValid(postId)) { 
+        throw new BadRequestError("Invalid post ID"); 
+    } 
+    
+    if (!userId) { 
+        throw new UnauthorizedError("User not authenticated"); 
+    } 
+    
+    let likeDoc = await Like.findOne({ post: postId }); 
+    if (!likeDoc) { 
+        likeDoc = await Like.create({ post: postId, users: [userId], count: 1 }); 
+    } 
+    else { 
+        const alreadyLiked = likeDoc.users.some(u => u.toString() === userId.toString()); 
+        if (alreadyLiked) { 
+            likeDoc.users = likeDoc.users.filter(u => u.toString() !== userId.toString()); 
+        } 
+        else { 
+            likeDoc.users.push(userId); 
+        } 
+        likeDoc.count = likeDoc.users.length; 
+        await likeDoc.save(); 
+    } 
+    
+    // Always return unified shape 
+    return { likesCount: likeDoc.count, likedByCurrentUser: likeDoc.users.some(u => u.toString() === userId.toString()), users: likeDoc.users }; 
+};
 
-        if (!userId) {
-            throw new BadRequestError("User ID is required");
-        }
-
-        const post = await Post.findById(postId);
-
-        if (!post || post.isDeleted) {
-            throw new NotFoundError("Post");
-        }
-
-        const alreadyLiked = post.likes.some(
-            l => l.toString() === userId.toString()
-        );
-
-        // Toggle like
-        if (alreadyLiked) {
-            post.likes = post.likes.filter(
-                l => l.toString() !== userId.toString()
-            );
-        } else {
-            post.likes.push(new Types.ObjectId(userId));
-        }
-
-        const updated = await post.save();
-
-        // Populate related fields for client response
-        await updated.populate([
-            { path: "user", select: "email" },
-            { path: "comments.user", select: "email" },
-            { path: "likes", select: "email" }
-        ]);
-
-        return updated;
-    } catch (error: any) {
-        if (error instanceof NotFoundError || error instanceof BadRequestError) {
-            throw error;
-        }
-
-        throw new DatabaseError("Failed to toggle like");
-    }
+export const getLikesState = async (postId: string, userId?: Types.ObjectId) => { 
+    if (!postId || !Types.ObjectId.isValid(postId)) { 
+        throw new BadRequestError("Invalid post ID"); 
+    } 
+    
+    const likeDoc = await Like.findOne({ post: postId }); 
+    
+    if (!likeDoc) { 
+        return { likesCount: 0, likedByCurrentUser: false, users: [] }; 
+    } 
+    console.log("getLikesState for", postId);
+    return { likesCount: likeDoc.count, likedByCurrentUser: userId ? likeDoc.users.some(u => u.toString() === userId.toString()) : false, users: likeDoc.users }; 
 };
 
 /**
@@ -411,27 +485,24 @@ export const addComment = async (
             throw new BadRequestError("Comment content is required");
         }
 
-        const post = await Post.findById(postId);
-
-        if (!post || post.isDeleted) {
-            throw new NotFoundError("Post");
-        }
-
-        // Append embedded comment
-        post.comments.push({ user: userId, content } as any);
-
-        const updated = await post.save();
-
-        await updated.populate([
-            { path: "user", select: "email" },
-            { path: "comments.user", select: "email" },
-            { path: "likes", select: "email" }
-        ]);
-
-        // Return the newly created comment as well
-        const newComment = updated.comments[updated.comments.length - 1];
-        return { post: updated, comment: newComment };
-    } catch (error: any) {
+        let commentDoc = await Comment.findOne({ post: postId }); 
+        
+        if (!commentDoc) { 
+            commentDoc = await Comment.create({ post: postId, comments: [{ user: userId, content }], users: [userId], count: 1 }); 
+        } 
+        else { 
+            commentDoc.comments.push({ user: userId, content }); 
+            
+            if (!commentDoc.users.some(u => u.toString() === userId.toString())) { 
+                commentDoc.users.push(userId); 
+            } 
+            
+            commentDoc.count = commentDoc.comments.length; 
+            await commentDoc.save(); 
+        } 
+        return { postId, comments: commentDoc.comments, commentsCount: commentDoc.count };
+    } 
+    catch (error: any) {
         if (error instanceof NotFoundError || error instanceof BadRequestError) {
             throw error;
         }
@@ -460,64 +531,75 @@ export const deleteComment = async (
         if (!postId || !Types.ObjectId.isValid(postId)) {
             throw new BadRequestError("Invalid post ID");
         }
-
         if (!commentId || !Types.ObjectId.isValid(commentId)) {
             throw new BadRequestError("Invalid comment ID");
         }
-
         if (!userId) {
-            throw new BadRequestError("User ID is required");
+            throw new UnauthorizedError("User not authenticated");
         }
 
-        const post = await Post.findById(postId);
-
-        if (!post || post.isDeleted) {
-            throw new NotFoundError("Post");
+        const commentDoc = await Comment.findOne({ post: postId });
+        if (!commentDoc) {
+            throw new NotFoundError("No comments found for this post");
         }
 
-        const comment = post.comments.find(
-            c => c._id?.toString() === commentId
-        );
-
+        const comment = commentDoc.comments.find(c => c._id!.toString() === commentId);
         if (!comment) {
-            throw new NotFoundError("Comment");
+            throw new NotFoundError("Comment not found");
         }
 
-        // Authorization logic
-        const isCommentOwner =
-            comment.user.toString() === userId.toString();
-        const isPostOwner =
-            post.user.toString() === userId.toString();
-
-        if (!isCommentOwner && !isPostOwner) {
-            throw new ForbiddenError(
-                "You can only delete your own comment or comments on your post"
-            );
+        // Only comment author OR post author can delete
+        if (comment.user.toString() !== userId.toString()) {
+            throw new UnauthorizedError("Not allowed to delete this comment");
         }
 
-        // Remove comment
-        post.comments = post.comments.filter(
-            c => c._id?.toString() !== commentId
-        );
+        commentDoc.comments = commentDoc.comments.filter(c => c._id!.toString() !== commentId);
+        commentDoc.count = commentDoc.comments.length;
+        await commentDoc.save();
 
-        const updated = await post.save();
-
-        await updated.populate([
-            { path: "user", select: "email" },
-            { path: "comments.user", select: "email" },
-            { path: "likes", select: "email" }
-        ]);
-
-        return updated;
+        return {
+            postId,
+            comments: commentDoc.comments,
+            commentsCount: commentDoc.count
+        };
     } catch (error: any) {
         if (
-            error instanceof NotFoundError ||
             error instanceof BadRequestError ||
-            error instanceof ForbiddenError
+            error instanceof UnauthorizedError ||
+            error instanceof NotFoundError
         ) {
             throw error;
         }
-
         throw new DatabaseError("Failed to delete comment");
+    }
+};
+
+/**
+ * Get comments state for a post
+ *
+ * @param postId - Target post ID
+ * @returns { commentsCount, comments }
+ */
+export const getCommentsState = async (postId: string) => {
+    try {
+        if (!postId || !Types.ObjectId.isValid(postId)) {
+            throw new BadRequestError("Invalid post ID");
+        }
+
+        const commentDoc = await Comment.findOne({ post: postId }).populate("comments.user", "email");
+
+        if (!commentDoc) {
+            return { commentsCount: 0, comments: [] };
+        }
+        console.log("getCommentsState for", postId);
+        return {
+            commentsCount: commentDoc.count,
+            comments: commentDoc.comments,
+        };
+    } catch (error: any) {
+        if (error instanceof BadRequestError || error instanceof NotFoundError) {
+            throw error;
+        }
+        throw new DatabaseError("Failed to fetch comments state");
     }
 };

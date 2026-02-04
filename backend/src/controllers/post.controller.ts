@@ -8,13 +8,14 @@ import {
 } from "../validations/post.schema";
 import * as postService from "../services/post.service";
 import { validateOrThrow } from "../utils/validator";
-import { ApiError, BadRequestError } from "../utils/errors";
+import { ApiError, BadRequestError, NotFoundError } from "../utils/errors";
 
 /**
  * Create a new post for the authenticated user.
  *
  * Route: POST /api/posts
  * Body: { content: string }
+ * Files: up to 5 images (≤1MB each) under field "images"
  * Authentication: Required
  */
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
@@ -27,21 +28,18 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
         // Validate request body against schema
         validateOrThrow(req.body, createPostRules, postMessages);
 
-        const content = req.body.content;
+        const content = typeof req.body.content === "string" ? req.body.content.trim() : "";
 
-        // Handle optional thumbnail: store only filename, frontend will build full URL
-        let thumbnailUrl = "";
-        if (req.file) {
-            thumbnailUrl = req.file.filename;
-        }
-
-        // Extra safeguard for empty or whitespace-only content
-        if (!req.body.content || req.body.content.trim() === '') {
-            throw new BadRequestError('Post content is required');
-        }
+        if (!content) { 
+            throw new BadRequestError("Post content is required"); 
+        } 
+        
+        // Prefer uploadedFiles (middleware attaches s3Url), fallback to multer req.files 
+        const uploadedFiles = (req as any).uploadedFiles as Express.Multer.File[] | undefined; 
+        const files = Array.isArray(uploadedFiles) ? uploadedFiles : Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : [];
 
         // Delegate post creation to service layer
-        const post = await postService.createPost(req.user.id, content, thumbnailUrl);
+        const post = await postService.createPost(req.user.id, content, files);
 
         res.status(201).json({
             success: true,
@@ -64,8 +62,9 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
 export const getAllPosts = async (req: Request, res: Response, next: NextFunction) => {
     try {
         // Parse and normalize pagination parameters
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 5;
+        const page = parseInt(String(req.query.page || "1"), 10) || 1;
+        const limit = parseInt(String(req.query.limit || "10"), 10) || 10;
+        const search = typeof req.query.search === "string" ? req.query.search : undefined;
 
         // Validate pagination values
         if (page < 1 || !Number.isInteger(page)) {
@@ -79,21 +78,27 @@ export const getAllPosts = async (req: Request, res: Response, next: NextFunctio
         }
 
         // Fetch paginated posts from service
-        const { posts, total, pages } = await postService.getAllPosts(page, limit);
+        const result = await postService.getAllPosts(page, limit, search);
 
-        res.status(200).json({
-            success: true,
-            message: "Posts retrieved successfully",
-            data: posts,
-            pagination: {
-                currentPage: page,
-                limit,
-                total,
-                totalPages: pages
-            }
-        });
-    } catch (err) {
-        next(err);
+        // Enrich each post with likes state 
+        const enrichedPosts = await Promise.all( 
+            result.data.map(async (postDoc: any) => { 
+                const post = postDoc.toObject ? postDoc.toObject() : postDoc;
+
+                const likesState = await postService.getLikesState(post._id.toString(), req.user?.id); 
+                const commentsState = await postService.getCommentsState(post._id.toString());
+
+                return { ...post, likesCount: likesState.likesCount, likedByCurrentUser: likesState.likedByCurrentUser, commentsCount: commentsState.commentsCount }; 
+            }) 
+        );
+
+        console.log("Posts fetched:", result.data.map(p => p._id));
+
+        return res.status(200).json({ success: true, data: enrichedPosts, pagination: result.pagination });
+    } catch (error: any) {
+        // Preserve known ApiError types 
+        if (error instanceof BadRequestError) { return next(error); }
+        return next(error);
     }
 };
 
@@ -106,19 +111,34 @@ export const getAllPosts = async (req: Request, res: Response, next: NextFunctio
 export const getPost = async (req: Request, res: Response, next: NextFunction) => {
     try {
         let postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-        
+
         // Validate postId format
         if (!postId || typeof postId !== "string" || postId.trim() === "") {
             throw new BadRequestError("Invalid or missing post ID");
         }
 
         postId = postId.trim();
-        const post = await postService.getPost(postId);
+        const postDoc = await postService.getPost(postId); 
+        
+        if (!postDoc || postDoc.isDeleted) { 
+            throw new NotFoundError("Post not found"); 
+        } 
+        
+        const post = postDoc.toObject ? postDoc.toObject() : postDoc;
+
+        const likesState = await postService.getLikesState(postId, req.user?.id);
+        const commentsState = await postService.getCommentsState(postId);
 
         res.status(200).json({
             success: true,
             message: "Post retrieved successfully",
-            data: post
+            data: { 
+                ...post, 
+                likesCount: likesState.likesCount, 
+                likedByCurrentUser: likesState.likedByCurrentUser, 
+                commentsCount: commentsState.commentsCount, 
+                comments: commentsState.comments 
+            }
         });
     } catch (err) {
         next(err);
@@ -132,6 +152,8 @@ export const getPost = async (req: Request, res: Response, next: NextFunction) =
  * - Only post owner can update
  *
  * Route: PUT /api/posts/:id
+ * Body: { content: string }
+ * Files: optional new images (≤5, ≤1MB each) under field "images"
  * Authentication: Required
  */
 export const updatePost = async (req: Request, res: Response, next: NextFunction) => {
@@ -160,18 +182,35 @@ export const updatePost = async (req: Request, res: Response, next: NextFunction
             throw new BadRequestError('Post content is required and cannot be empty');
         }
 
-        // Handle optional thumbnail: store only filename
-        let thumbnailUrl = req.body.thumbnail || "";
-        if (req.file) {
-            // Validate file was uploaded successfully
-            if (!req.file.filename) {
-                throw new BadRequestError("File upload failed - no filename");
-            }
-            thumbnailUrl = req.file.filename;
-        }
+        // Prefer uploadedFiles (middleware attaches s3Url), fallback to multer req.files 
+        const uploadedFiles = (req as any).uploadedFiles as (Express.Multer.File & { s3Url?: string })[] | undefined; 
+        const rawFiles = Array.isArray(uploadedFiles) ? uploadedFiles : Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : []; 
+        
+        // Separate new images and replacements by fieldname 
+        const newFiles: Express.Multer.File[] = []; 
+        const replaceMap: { [index: number]: Express.Multer.File } = {}; 
+        const replaceFieldRegex = /^replaceMap \[(\d+)\] $/; 
+        
+        for (const f of rawFiles) { 
+            if (f.fieldname === "images") { 
+                newFiles.push(f); continue; 
+            } 
+            
+            const m = String(f.fieldname).match(replaceFieldRegex); 
+            
+            if (m) { 
+                const idx = parseInt(m[1], 10); 
+                if (!Number.isNaN(idx)) { 
+                    replaceMap[idx] = f; 
+                    continue; 
+                } 
+            } 
+            
+            // Unknown fieldname — reject request 
+            throw new BadRequestError(`Invalid file field name: ${f.fieldname}`); }
 
         // Delegate update logic to service layer
-        const post = await postService.updatePost(postId, req.user.id, req.body.content, thumbnailUrl);
+        const post = await postService.updatePost(postId, req.user.id, req.body.content, newFiles.length > 0 ? newFiles : undefined, Object.keys(replaceMap).length > 0 ? replaceMap : undefined);
 
         res.status(200).json({
             success: true,
@@ -226,24 +265,21 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
  */
 export const toggleLike = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        if (!req.user || !req.user.id) {
-            throw new ApiError(401, "User not authenticated");
-        }
+        if (!req.user || !req.user.id) throw new ApiError(401, "User not authenticated");
 
-        const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-        if (!postId) throw new BadRequestError("Post ID is required");
-
-        const post = await postService.toggleLike(postId, req.user.id);
+        const postId = String(req.params.id);
+        const result = await postService.toggleLike(postId, req.user.id);
 
         res.status(200).json({
             success: true,
             message: "Toggled like",
-            data: post
+            data: result
         });
     } catch (err) {
         next(err);
     }
 };
+
 
 /**
  * Add a comment to a post.
@@ -258,7 +294,7 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
             throw new ApiError(401, "User not authenticated");
         }
 
-        const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+        const postId = String(req.params.id);
         if (!postId) throw new BadRequestError("Post ID is required");
 
         // Validate comment payload
@@ -269,8 +305,7 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
         res.status(201).json({
             success: true,
             message: "Comment added",
-            data: result.comment,
-            post: result.post
+            data: { comments: result.comments, commentsCount: result.commentsCount }
         });
     } catch (err) {
         next(err);
@@ -293,21 +328,20 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
             throw new ApiError(401, "User not authenticated");
         }
 
-        const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-        const commentId = Array.isArray(req.params.commentId)
-            ? req.params.commentId[0]
-            : req.params.commentId;
+        const postId = String(req.params.id); 
+        const commentId = String(req.params.commentId);
 
         if (!postId || !commentId) {
             throw new BadRequestError("Post ID and Comment ID are required");
         }
 
-        const post = await postService.deleteComment(postId, commentId, req.user.id);
+        const result = await postService.deleteComment(postId, commentId, req.user.id);
 
-        res.status(204).json({
+        // Return updated comments state so frontend can refresh UI
+        res.status(200).json({
             success: true,
             message: "Comment deleted",
-            data: post
+            data: { comments: result.comments, commentsCount: result.commentsCount }
         });
     } catch (err) {
         next(err);

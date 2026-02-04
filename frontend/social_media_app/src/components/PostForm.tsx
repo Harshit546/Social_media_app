@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { fetchClient } from "../api/fetchClient";
-import { Button, TextField, Card, CardContent } from "@mui/material";
+import { Button, TextField, Card, CardContent, Box } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 
 /**
@@ -9,7 +9,7 @@ import SendIcon from "@mui/icons-material/Send";
  *
  * Features:
  * - Text content submission
- * - Optional thumbnail image upload
+ * - Optional multiple image uploads (≤5, ≤1MB each)
  * - Uses multipart/form-data via FormData
  * - Notifies parent component after successful creation
  *
@@ -23,14 +23,32 @@ export default function PostForm({ onPostCreated }: { onPostCreated?: () => void
     const [content, setContent] = useState("");
 
     /**
-     * Thumbnail image file (optional)
+     * Images upload
      */
-    const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [images, setImages] = useState<File[]>([]);
 
     /**
      * Loading state to prevent duplicate submissions
      */
     const [loading, setLoading] = useState(false);
+
+    /** Handle file selection with validation */ 
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { 
+        const files = e.target.files ? Array.from(e.target.files) : []; 
+        
+        if (files.length > 5) { 
+            alert("You can upload a maximum of 5 images."); 
+            return; 
+        } 
+        
+        const oversized = files.find(f => f.size > 1024 * 1024); 
+        
+        if (oversized) { 
+            alert("Each image must be ≤ 1MB."); 
+            return; 
+        } 
+        setImages(files); 
+    };
 
     /**
      * Handles post submission
@@ -39,7 +57,7 @@ export default function PostForm({ onPostCreated }: { onPostCreated?: () => void
      */
     const submitPost = async () => {
         // Prevent empty post (no text AND no image)
-        if (!content.trim() && !thumbnail) return;
+        if (!content.trim() && images.length === 0) return;
 
         setLoading(true);
         try {
@@ -50,9 +68,7 @@ export default function PostForm({ onPostCreated }: { onPostCreated?: () => void
             const formData = new FormData();
             formData.append("content", content);
 
-            if (thumbnail) {
-                formData.append("thumbnail", thumbnail);
-            }
+            images.forEach(file => formData.append("images", file));
 
             // Create post API call
             await fetchClient("/posts", {
@@ -62,7 +78,7 @@ export default function PostForm({ onPostCreated }: { onPostCreated?: () => void
 
             // Reset form after successful submission
             setContent("");
-            setThumbnail(null);
+            setImages([]);
 
             // Notify parent component (e.g. refresh feed)
             onPostCreated?.();
@@ -106,18 +122,24 @@ export default function PostForm({ onPostCreated }: { onPostCreated?: () => void
                     <input
                         type="file"
                         accept="image/*"
-                        onChange={(e) =>
-                            setThumbnail(
-                                e.target.files ? e.target.files[0] : null
-                            )
-                        }
+                        multiple
+                        onChange={handleFileChange}
                     />
+
+                    {/* Preview selected filenames */}
+                    {images.length > 0 && (
+                        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                            {images.map((img, idx) => (
+                                <span key={idx}>{img.name}</span>
+                            ))}
+                        </Box>
+                    )}
 
                     {/* Submit Button */}
                     <Button
                         variant="contained"
                         onClick={submitPost}
-                        disabled={loading || (!content.trim() && !thumbnail)}
+                        disabled={loading || (!content.trim() && images.length === 0)}
                         endIcon={<SendIcon />}
                         sx={{
                             background:

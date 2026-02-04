@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { fetchClient } from "../api/fetchClient";
 import PostForm from "../components/PostForm";
 import PostCard from "../components/PostCard";
 import Navbar from "../components/Navbar";
-import { Container, CircularProgress, Box, Button, Pagination } from "@mui/material";
+import { Container, CircularProgress, Box, Button, Pagination, TextField, InputAdornment } from "@mui/material";
+import SearchIcon from "@mui/icons-material/Search";
 
 // Feed page component: displays posts with pagination and allows creating new posts
 export default function Feed() {
@@ -22,20 +23,38 @@ export default function Feed() {
     // Optional: full pagination info returned by backend (like total posts)
     const [pagination, setPagination] = useState<any>(null);
 
+    // Search term state 
+    const [searchTerm, setSearchTerm] = useState<string>(""); 
+    
+    // Debounced search term to avoid rapid requests 
+    const [debouncedSearch, setDebouncedSearch] = useState<string>(""); 
+    
+    // Ref for debounce timer 
+    const debounceRef = useRef<number | null>(null);
+
     // Function to load posts for a given page
-    const loadPosts = async (page: number) => {
+    const loadPosts = async (page: number, search?: string) => {
         setLoading(true); // show loader
         try {
-            // Fetch posts with query parameter for pagination
-            const data = await fetchClient(`/posts?page=${page}`);
-
-            // Normalize data: data.data should be an array of posts
-            setPosts(Array.isArray(data.data) ? data.data : data.data ?? []);
-
-            // Save pagination info if returned
-            if (data.pagination) {
-                setPagination(data.pagination);
-                setTotalPages(data.pagination.totalPages);
+            // Build query string 
+            const qs = new URLSearchParams(); 
+            qs.set("page", String(page)); 
+            qs.set("limit", "10"); 
+            if (search && search.trim()) { qs.set("search", search.trim()); } 
+            
+            const data = await fetchClient(`/posts?${qs.toString()}`); 
+            
+            // Normalize data: data.data should be an array of posts 
+            setPosts(Array.isArray(data.data) ? data.data : data.data ?? []); 
+            
+            // Save pagination info if returned 
+            if (data.pagination) { 
+                setPagination(data.pagination); 
+                setTotalPages(data.pagination.totalPages); 
+            } 
+            else { 
+                // Fallback: compute pages if backend didn't return pagination 
+                setTotalPages(1); 
             }
         } catch (error) {
             console.error("Failed to load posts:", error);
@@ -44,10 +63,29 @@ export default function Feed() {
         }
     };
 
-    // Load posts whenever currentPage changes
-    useEffect(() => {
-        loadPosts(currentPage);
-    }, [currentPage]);
+    // Load posts whenever currentPage or debouncedSearch changes 
+    useEffect(() => { 
+        loadPosts(currentPage, debouncedSearch); 
+    }, [currentPage, debouncedSearch]);
+
+    // Debounce searchTerm updates 
+    useEffect(() => { 
+        if (debounceRef.current) { 
+            window.clearTimeout(debounceRef.current); 
+        } 
+        // Wait 300ms after user stops typing 
+        debounceRef.current = window.setTimeout(() => { 
+            setDebouncedSearch(searchTerm); 
+            // Reset to first page when search changes 
+            setCurrentPage(1); 
+        }, 300); 
+        
+        return () => { 
+            if (debounceRef.current) { 
+                window.clearTimeout(debounceRef.current); 
+            } 
+        }; 
+    }, [searchTerm]);
 
     // Handlers for previous/next page buttons
     const handlePreviousPage = () => {
@@ -64,7 +102,7 @@ export default function Feed() {
 
     // When a new post is created, reload page 1 to show latest posts
     const handlePostCreated = async () => {
-        await loadPosts(1);
+        await loadPosts(1, debouncedSearch);
         setCurrentPage(1);
     };
 
@@ -76,8 +114,25 @@ export default function Feed() {
             {/* Main content container */}
             <Container maxWidth="sm" sx={{ py: 4 }}>
 
-                {/* Post creation form */}
-                <PostForm onPostCreated={() => handlePostCreated()} />
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mb: 2 }}>
+                    <TextField placeholder="Search posts by content..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                        size="small"
+                        InputProps={{
+                            startAdornment: (
+                                <InputAdornment position="start">
+                                    <SearchIcon />
+                                </InputAdornment>
+                            )
+                        }}
+                        sx={{
+                            backgroundColor: "#fff",
+                            borderRadius: 2
+                        }}
+                    />
+
+                    {/* Post creation form */}
+                    <PostForm onPostCreated={() => handlePostCreated()} />
+                </Box>
 
                 {/* Loading state */}
                 {loading ? (

@@ -25,7 +25,8 @@ import {
     IconButton,
     TextField,
     Avatar,
-    Box
+    Box,
+    ImageList, ImageListItem
 } from "@mui/material";
 import { fetchClient, API_BASE } from "../api/fetchClient";
 import { Edit, Delete, Favorite, Comment as CommentIcon } from "@mui/icons-material";
@@ -78,16 +79,13 @@ export default function PostCard({ post: initialPost }: any) {
      * 
      * Prefer backend-calculated counts when available.
      */
-    const likesCount = post.likesCount ?? post.likes?.length ?? 0;
-    const commentsCount = post.commentsCount ?? post.comments?.length ?? 0;
+    const likesCount = post.likesCount ?? 0;
+    const commentsCount = post.commentsCount ?? 0;
 
     /**
      * Check if current user liked the post
      */
-    const likedByCurrentUser = Boolean(
-        currentUser &&
-        post.likes?.some?.((l: any) => String(l) === String(currentUser.id))
-    );
+    const likedByCurrentUser = post.likedByCurrentUser ?? false;
 
     /**
      * Delete post (author only)
@@ -117,6 +115,12 @@ export default function PostCard({ post: initialPost }: any) {
      * - res.post
      */
     const normalizeResponsePost = (res: any) => {
+        // Single post response 
+        if (res?.data?.data) return res.data.data; 
+        
+        // Feed response 
+        if (Array.isArray(res?.data?.data)) return res.data.data; 
+        
         return res?.data ?? res?.post ?? res;
     };
 
@@ -131,12 +135,15 @@ export default function PostCard({ post: initialPost }: any) {
 
         setLoadingLike(true);
         try {
-            const res = await fetchClient(`/posts/${post._id}/like`, {
-                method: "PATCH"
-            });
+            const res = await fetchClient(`/posts/${post._id}/like`, { method: "PATCH" });
+            const updated = res.data;
 
-            const updatedPost = normalizeResponsePost(res);
-            if (updatedPost) setPost(updatedPost);
+            setPost((p: any) => ({
+                ...p,
+                likesCount: updated.likesCount,
+                likedByCurrentUser: updated.likedByCurrentUser,
+                likes: updated.users
+            }));
         } catch (err: any) {
             alert(err?.message || "Failed to toggle like");
         } finally {
@@ -163,8 +170,8 @@ export default function PostCard({ post: initialPost }: any) {
                 body: JSON.stringify({ content })
             });
 
-            const updatedPost = normalizeResponsePost(res);
-            if (updatedPost) setPost(updatedPost);
+            const updated = normalizeResponsePost(res); 
+            setPost((p: any) => ({ ...p, comments: updated.comments, commentsCount: updated.commentsCount, }));
 
             setCommentText("");
             setShowComments(true);
@@ -195,24 +202,10 @@ export default function PostCard({ post: initialPost }: any) {
                 { method: "DELETE" }
             );
 
-            const updatedPost = normalizeResponsePost(res);
-
-            if (updatedPost?.comments) {
-                setPost(updatedPost);
-            } else {
-                // Fallback: optimistic local removal
-                setPost((p: any) => {
-                    const newComments = (p.comments ?? []).filter(
-                        (c: any) => String(c._id) !== String(commentId)
-                    );
-                    return {
-                        ...p,
-                        comments: newComments,
-                        commentsCount: newComments.length
-                    };
-                });
-            }
-        } catch (err: any) {
+            const updated = normalizeResponsePost(res); 
+            setPost((p: any) => ({ ...p, comments: updated.comments, commentsCount: updated.commentsCount, }));
+        } 
+        catch (err: any) {
             alert(err?.message || "Failed to delete comment");
         }
     };
@@ -277,18 +270,20 @@ export default function PostCard({ post: initialPost }: any) {
                     {post.content}
                 </Typography>
 
-                {/* Thumbnail image */}
-                {post.thumbnail && (
-                    <Box sx={{ mt: 2 }}>
-                        <img
-                            src={
-                                post.thumbnail.startsWith("http")
-                                    ? post.thumbnail
-                                    : `${API_BASE}/uploads/${post.thumbnail}`
-                            }
-                            alt="Post thumbnail"
-                            style={{ maxWidth: "100%", borderRadius: 8 }}
-                        />
+                {/* Images (multiple) */} 
+                {post.images && post.images.length > 0 && (
+                    <Box sx={{ mt: 2 }}> 
+                        <ImageList variant="masonry" cols={post.images.length > 2 ? 3 : post.images.length} gap={8} > 
+                            {post.images.map((url: string, idx: number) => (
+                                <ImageListItem key={idx}> 
+                                    <img 
+                                        src={url.startsWith("http") ? url : `${API_BASE}/uploads/${url}`} 
+                                        alt={`Post image ${idx + 1}`} 
+                                        style={{ borderRadius: 8, width: "100%", height: "auto" }} 
+                                    /> 
+                                </ImageListItem>
+                            ))} 
+                        </ImageList> 
                     </Box>
                 )}
             </CardContent>
@@ -301,11 +296,11 @@ export default function PostCard({ post: initialPost }: any) {
                     <IconButton
                         onClick={toggleLike}
                         disabled={loadingLike}
-                        color={likedByCurrentUser ? "error" : "default"}
+                        color={post.likedByCurrentUser ? "error" : "default"}
                     >
                         <Favorite />
                     </IconButton>
-                    <Typography>{likesCount}</Typography>
+                    <Typography>{post.likesCount}</Typography>
 
                     <IconButton onClick={() => setShowComments(v => !v)}>
                         <CommentIcon />

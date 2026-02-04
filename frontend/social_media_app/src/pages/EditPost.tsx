@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchClient, API_BASE } from "../api/fetchClient";
-import { Button, Card, CardContent, TextField, Container, Box, CircularProgress, Alert } from "@mui/material";
+import { fetchClient } from "../api/fetchClient";
+import { Button, Card, CardContent, TextField, Container, Box, CircularProgress, Alert, Typography } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 
-// Max allowed file size for uploaded images (5MB)
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+// Max allowed file size for uploaded images (1MB)
+const MAX_FILE_SIZE = 1 * 1024 * 1024;
 
 // Allowed image MIME types
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/jpg"];
@@ -17,8 +17,9 @@ export default function EditPost() {
 
     // Form state
     const [content, setContent] = useState("");
-    const [thumbnail, setThumbnail] = useState<File | null>(null); // New uploaded image
-    const [currentThumbnail, setCurrentThumbnail] = useState(""); // Existing image from post
+    const [images, setImages] = useState<string[]>([]);
+    const [replaceFiles, setReplaceFiles] = useState<{ [index: number]: File }>({});
+    const [previewUrls, setPreviewUrls] = useState<{ [index: number]: string }>({});
     const [loading, setLoading] = useState(true); // Loader while fetching post
     const [updating, setUpdating] = useState(false); // Loader while updating post
     const [error, setError] = useState<string | null>(null); // Error messages
@@ -42,9 +43,15 @@ export default function EditPost() {
                     throw new Error("Invalid post data received");
                 }
 
+                const raw = post.images || [];
+                const normalized = raw.map((i: any) => (typeof i === "string" ? i : i.url));
+
+                console.log("fetched post:", post);
+                console.log("normalized images:", normalized);
+
                 // Populate form state
                 setContent(post.content);
-                if (post.thumbnail) setCurrentThumbnail(post.thumbnail);
+                setImages(normalized); // images array from backend
             } catch (err: any) {
                 const errorMsg = err?.message || "Failed to load post";
                 setError(errorMsg);
@@ -60,31 +67,38 @@ export default function EditPost() {
     }, [id, navigate]);
 
     // Handle file selection and validation
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleReplaceFile = (index: number, file: File | null) => {
         setFileError(null); // Clear previous file errors
-        const file = e.target.files?.[0];
 
         if (!file) {
-            setThumbnail(null);
             return;
         }
 
         // Validate file type
         if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
             setFileError(`Invalid file type. Allowed: JPEG, PNG, GIF, WebP, JPG`);
-            e.target.value = ""; // Clear input
             return;
         }
 
         // Validate file size
         if (file.size > MAX_FILE_SIZE) {
-            setFileError(`File size exceeds 5MB limit. Current: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
-            e.target.value = "";
+            setFileError("File size exceeds 1MB limit.");
             return;
         }
 
+        // revoke old preview if present 
+        setPreviewUrls(prev => {
+            if (prev[index]) {
+                try {
+                    URL.revokeObjectURL(prev[index]);
+                }
+                catch { }
+            } const newPreview = URL.createObjectURL(file);
+            return { ...prev, [index]: newPreview };
+        });
+
         // Set valid file to state
-        setThumbnail(file);
+        setReplaceFiles(prev => ({ ...prev, [index]: file }));
     };
 
     // Handle post update submission
@@ -102,15 +116,10 @@ export default function EditPost() {
             const formData = new FormData();
             formData.append("content", content.trim());
 
-            // Include current thumbnail if no new file uploaded
-            if (!thumbnail && currentThumbnail) {
-                formData.append("thumbnail", currentThumbnail);
-            }
-
-            // Include new thumbnail if uploaded
-            if (thumbnail) {
-                formData.append("thumbnail", thumbnail);
-            }
+            // Attach replacement files with their imageId 
+            Object.entries(replaceFiles).forEach(([index, file]) => {
+                formData.append(`replaceMap[${index}]`, file);
+            });
 
             // Send PUT request to update post
             const res = await fetchClient(`/posts/${id}`, {
@@ -127,7 +136,6 @@ export default function EditPost() {
         } catch (err: any) {
             const errorMsg = err?.message || "Failed to update post";
             setError(errorMsg);
-            console.error("Update post error:", err);
         } finally {
             setUpdating(false);
         }
@@ -206,50 +214,53 @@ export default function EditPost() {
                                 }}
                             />
 
-                            {/* Display current thumbnail if exists */}
-                            {currentThumbnail && !thumbnail && (
-                                <Box sx={{ mt: 2 }}>
-                                    <p className="text-[12px] text-[#666] mb-2">Current Image:</p>
-                                    <img
-                                        src={currentThumbnail}
-                                        alt="Current post thumbnail"
-                                        style={{ maxWidth: "100%", maxHeight: "200px", borderRadius: 8 }}
-                                        onError={() => setError("Failed to load current image")}
-                                    />
-                                </Box>
-                            )}
+                            {/* Current images with replace option (use index-based replacement) */}
+                            {images.length > 0 && (
+                                <Box sx={{ mt: 2, display: "flex", flexWrap: "wrap", gap: 2 }}>
+                                    {images.map((imgUrl, idx) => {
+                                        const preview = previewUrls[idx];
+                                        const src = preview ?? imgUrl;
+                                        return (
+                                            <Box key={idx} sx={{ width: { xs: "100%", sm: "48%" }, display: "flex", flexDirection: "column", gap: 1 }} >
+                                                <Typography variant="caption" color="text.secondary">Image {idx + 1}</Typography>
+                                                <Box sx={{ width: "100%", height: 200, borderRadius: 2, overflow: "hidden", backgroundColor: "#f4f6fb", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                                                    <img src={src} alt={`Post image ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setError("Failed to load image")} />
+                                                </Box>
 
-                            {/* Preview new uploaded thumbnail */}
-                            {thumbnail && (
-                                <Box sx={{ mt: 2 }}>
-                                    <p className="text-[12px] text-[#666] mb-2">New Image Preview:</p>
-                                    <img
-                                        src={URL.createObjectURL(thumbnail)}
-                                        alt="New post thumbnail"
-                                        style={{ maxWidth: "100%", maxHeight: "200px", borderRadius: 8 }}
-                                        onError={() => setError("Failed to preview image")}
-                                    />
-                                </Box>
-                            )}
+                                                {/* Hidden input + visible button */}
+                                                <label style={{ width: "100%" }}>
+                                                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleReplaceFile(idx, e.target.files ? e.target.files[0] : null)} disabled={updating} />
+                                                    <Button variant="outlined" component="span" fullWidth disabled={updating} sx={{ textTransform: "none", borderColor: fileError ? "#f44336" : undefined }} > {replaceFiles[idx] ? "Change selected file" : "Replace image"}
+                                                    </Button>
+                                                </label>
+                                                <Typography variant="caption" color="text.secondary"> Max size: 1MB | Formats: JPEG, PNG, GIF, WebP </Typography>
 
-                            {/* File input */}
-                            <Box>
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={handleFileChange}
-                                    disabled={updating}
-                                    style={{
-                                        padding: '8px',
-                                        border: fileError ? '2px solid #f44336' : '1px solid #e0e0e0',
-                                        borderRadius: '4px',
-                                        width: '100%'
-                                    }}
-                                />
-                                <p className="text-[12px] text-[#999] mt-1">
-                                    Max size: 5MB | Formats: JPEG, PNG, GIF, WebP
-                                </p>
-                            </Box>
+                                                {replaceFiles[idx] && (
+                                                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                                        <Typography variant="caption">{replaceFiles[idx].name}</Typography>
+                                                        <Button size="small" onClick={() => {
+                                                            // revoke preview and remove replacement 
+                                                            if (previewUrls[idx]) { 
+                                                                try { 
+                                                                    URL.revokeObjectURL(previewUrls[idx]); 
+                                                                } 
+                                                                catch { } 
+                                                                setPreviewUrls(prev => { 
+                                                                    const copy = { ...prev }; 
+                                                                    delete copy[idx]; 
+                                                                    return copy; 
+                                                                }); 
+                                                            } 
+                                                            
+                                                            setReplaceFiles(prev => { 
+                                                                const copy = { ...prev }; 
+                                                                delete copy[idx]; 
+                                                                return copy; 
+                                                            }); 
+                                                            
+                                                            setFileError(null);
+                                                        }}> Remove </Button> </Box>)} </Box>);
+                                    })} </Box>)}
 
                             {/* Action buttons: Cancel and Update */}
                             <div className="flex gap-3">

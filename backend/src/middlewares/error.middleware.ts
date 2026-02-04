@@ -21,6 +21,7 @@
 
 import { Request, Response, NextFunction } from "express";
 import { ApiError } from "../utils/errors";
+import ErrorLog from "../models/errorLog.model";
 
 // Response format interface
 interface ErrorResponse {
@@ -40,7 +41,7 @@ interface ErrorResponse {
  */
 export const errorHandler = (
     err: any,
-    _req: Request,
+    req: Request,
     res: Response,
     _next: NextFunction
 ) => {
@@ -120,12 +121,36 @@ export const errorHandler = (
         message = err.message || message;
     }
 
+    const timestamp = new Date();
+
+    // Fire-and-forget: persist error log to DB without blocking response
+    (async () => {
+        try {
+            await ErrorLog.create({
+                apiName: req.originalUrl,
+                service: "backend",
+                errorDetail: {
+                    name: err?.name,
+                    message: err?.message,
+                    stack: err?.stack,
+                    raw: err,
+                },
+                userId: (req as any).user?.id ?? null,
+                errorOccurredTime: timestamp,
+            });
+        } catch (logErr) {
+            if (process.env.NODE_ENV === "development") {
+                console.error("Failed to write error log:", logErr);
+            }
+        }
+    })();
+
     // Build structured error response
     const response: ErrorResponse = {
         success: false,
         message,
         statusCode,
-        timestamp: new Date().toISOString()
+        timestamp: timestamp.toISOString()
     };
 
     if (errors) {
